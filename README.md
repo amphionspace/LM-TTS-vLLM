@@ -89,7 +89,9 @@ CUDA_VISIBLE_DEVICES=6 $TTS_PYTHON -m lm_tts_vllm.infer \
   Talker repetition penalty=1.05）。相同随机种子不保证不同 logits 采到同一 token。
 - demo 的低温 preset：`--temperature 0.3 --top-k 10 --repetition-penalty 2.0 --code-predictor-greedy`。
 - `--precision-profile native`：对照 vLLM 原始融合算子。
-- `--precision-profile sdpa --engine-mode reference`：在相同 vLLM 权重和 BF16 算术下
+- `--attention-backend FLASH_ATTN|FLASHINFER|TRITON_ATTN`：选择 vLLM 原生 attention backend，
+  默认 `FLASH_ATTN`。可用性由当前 GPU 和 vLLM 校验；报告记录实际 backend、实现类和 FA 版本。
+- **仅用于诊断** `--precision-profile sdpa --engine-mode reference`：在相同 vLLM 权重和 BF16 算术下
   使用 PyTorch SDPA，定位 attention 内核差异。它仅支持单请求完整前缀，是诊断模式，
   不能用来宣称 paged attention 或 CUDA graph 性能。
 - `--engine-mode cached`：验证 KV cache 复用；teacher-forced 完成后先清空缓存，再测自由生成，
@@ -149,3 +151,20 @@ CUDA_VISIBLE_DEVICES=6 $TTS_PYTHON -m lm_tts_vllm.replay \
 
 接口参考：[vLLM 0.32.0 release](https://github.com/vllm-project/vllm/releases/tag/v0.32.0)、
 [plugin system](https://docs.vllm.ai/en/latest/design/plugin_system/)。
+
+## 逐层定位原生 vLLM 的误差
+
+正式计算路径使用 vLLM `FLASH_ATTN` backend；SDPA 替换只作为历史诊断对照，
+不用于速度验收。以下工具始终保留 vLLM attention，比较同一首步 prefill 的
+RMSNorm、Q/K/V 投影、Q/K norm、attention 输出、MLP 和逐层残差输出：
+
+```bash
+CUDA_VISIBLE_DEVICES=6 $TTS_PYTHON -m lm_tts_vllm.layer_audit \
+  --model "$MODEL1" --backbone artifacts/backbone-56384 \
+  --reference-run results/56384-greedy --vllm-python "$VLLM_PYTHON" \
+  --output results/56384-layer-audit
+```
+
+第一层保存所有 token，之后保存最后一个 token；`report.json` 给出首个不同的
+操作和各处误差，两个 `*-layers.pt` 保留对照张量。诊断 hook 只在该工具发起
+的单次 prefill 期间安装，不进入正常推理路径，也不用于测量速度。

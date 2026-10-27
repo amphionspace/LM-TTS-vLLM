@@ -7,7 +7,8 @@ import subprocess
 
 
 class TalkerWorker:
-    def __init__(self, python, model, log, precision="bf16", timeout=900, engine_mode="reference"):
+    def __init__(self, python, model, log, precision="bf16", timeout=900, engine_mode="reference",
+                 attention_backend="FLASH_ATTN"):
         left, right = socket.socketpair()
         self.connection = Connection(left.detach())
         self.timeout = timeout
@@ -23,7 +24,7 @@ class TalkerWorker:
         try:
             self.process = subprocess.Popen(
                 [str(python), "-m", "lm_tts_vllm.worker", "--fd", str(right.fileno()), "--model", str(model),
-                 "--engine-mode", engine_mode],
+                 "--engine-mode", engine_mode, "--attention-backend", attention_backend],
                 pass_fds=(right.fileno(),), env=env, stdout=self.log, stderr=subprocess.STDOUT)
         finally:
             right.close()

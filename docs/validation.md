@@ -76,3 +76,14 @@ step-100、BF16 cached、non-streaming、Auto、batch=1。原 journal 返回 `st
 `--require-identical-codes` 保存报告后返回失败，符合回归门槛的预期。SDPA 诊断
 没有消除差异，且仍跨 Torch/CUDA 版本，不能据此将剩余误差归因于单一算子。
 这是定位模式，不作为最终性能路径。
+
+## vLLM 原生 FlashAttention 的逐层定位
+
+`results/56384-layer-audit-qkv` 对相同的首步 prefill 做逐层 hook，实际计算仍使用
+vLLM `FLASH_ATTN`。第一层 RMSNorm、Q/K/V 投影、Q/K norm，以及经过 RoPE 后
+真正送入 attention 的 Q、K、V，均逐元素完全一致。
+
+首个差异出现在 attention 输出：最大绝对误差 0.0078125，平均绝对误差
+0.000001909，相对 L2 约 0.0001916。由此可以把这条路径上的初始差异定位到
+attention 计算，而不是前端输入、QKV 投影或 RoPE。后续层和 code predictor
+会继续传播、放大差异；这个定位结果不等于完整 codec 一致性已经通过。

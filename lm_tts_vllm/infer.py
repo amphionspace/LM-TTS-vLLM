@@ -96,6 +96,7 @@ def main():
     parser.add_argument("--mode", choices=["pytorch", "vllm", "compare"], default="compare")
     parser.add_argument("--precision-profile", choices=["bf16", "native", "sdpa"], default="bf16")
     parser.add_argument("--engine-mode", choices=["reference", "cached"], default="reference")
+    parser.add_argument("--attention-backend", choices=["FLASH_ATTN", "FLASHINFER", "TRITON_ATTN"], default="FLASH_ATTN")
     parser.add_argument("--reference-audio", required=True)
     parser.add_argument("--reference-text", required=True)
     parser.add_argument("--text", required=True)
@@ -220,7 +221,7 @@ def main():
             torch.save(trace, out / "trace.pt")
     if args.mode in {"vllm", "compare"}:
         with TalkerWorker(args.vllm_python, args.backbone, out / "vllm.log", args.precision_profile,
-                          engine_mode=args.engine_mode) as worker:
+                          engine_mode=args.engine_mode, attention_backend=args.attention_backend) as worker:
             report["worker"] = worker.info
             if trace:
                 report["teacher_forced"] = audit(model, worker, trace)

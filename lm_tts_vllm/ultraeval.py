@@ -21,6 +21,7 @@ def main():
     parser.add_argument("--worker-log", type=Path, required=True)
     parser.add_argument("--precision-profile", choices=["bf16", "native", "sdpa"], default="bf16")
     parser.add_argument("--engine-mode", choices=["reference", "cached"], default="reference")
+    parser.add_argument("--attention-backend", choices=["FLASH_ATTN", "FLASHINFER", "TRITON_ATTN"], default="FLASH_ATTN")
     parser.add_argument("evaluation_args", nargs=argparse.REMAINDER)
     args = parser.parse_args()
     if args.precision_profile == "sdpa" and args.engine_mode != "reference":
@@ -50,7 +51,7 @@ def main():
     if args.worker_log.exists():
         raise FileExistsError(args.worker_log)
     with TalkerWorker(args.vllm_python, args.backbone, args.worker_log, args.precision_profile,
-                      engine_mode=args.engine_mode) as worker:
+                      engine_mode=args.engine_mode, attention_backend=args.attention_backend) as worker:
         def generate(self, *positional, **kwargs):
             with backbone_override(self, worker):
                 return original(self, *positional, **kwargs)
