@@ -36,12 +36,32 @@ class LMTTSForConditionalGeneration(Qwen3TTSTalkerForConditionalGeneration):
         self._native_cp.capture()
         return loaded
 
+    @torch.inference_mode()
+    def create_voice_clone_prompt(self, ref_audio, ref_text=None, x_vector_only_mode=False):
+        """Export one reusable CPU payload through vLLM's standard apply_model RPC.
+
+        The existing native speaker/codec encoders own preprocessing and BF16
+        execution. No second Transformers model or custom worker is needed.
+        """
+        if not isinstance(x_vector_only_mode, bool):
+            raise ValueError("x_vector_only_mode must be a boolean")
+        if not x_vector_only_mode and (not isinstance(ref_text, str) or not ref_text.strip()):
+            raise ValueError("ICL voice cloning requires reference text")
+        wav, sr = self._prompt_builder.normalize_ref_audio(ref_audio)
+        speaker = self._prompt_builder.extract_speaker_embedding(wav, sr)
+        codes = None
+        if not x_vector_only_mode:
+            codes = self._encode_ref_audio_batch([wav], sr, device=speaker.device)[0].cpu().tolist()
+        return {"ref_code": codes, "ref_spk_embedding": speaker.float().cpu().tolist(),
+                "ref_text": ref_text, "x_vector_only_mode": x_vector_only_mode,
+                "icl_mode": not x_vector_only_mode}
+
     @staticmethod
     def _validate_prompt(info):
         mode = info.get("non_streaming_mode")
         mode = mode[0] if isinstance(mode, list) and mode else mode
-        if mode is not True:
-            raise ValueError("LM-TTS native validation requires non_streaming_mode=True")
+        if mode is not None and not isinstance(mode, bool):
+            raise ValueError("non_streaming_mode must be a boolean")
 
     def preprocess_batch_mrv2(self, *, req_infos, device):
         for info in req_infos:
@@ -59,25 +79,28 @@ class LMTTSForConditionalGeneration(Qwen3TTSTalkerForConditionalGeneration):
         if do_sample is None:
             do_sample = self._subtalker_sampling_params.get("do_sample", True)
         infos = kwargs.get("req_infos") or []
-        info = infos[0] if infos else {}
-        def param(name, default):
-            value = info.get(name, default)
-            return value[0] if isinstance(value, list) and value else value
-        do_sample = param("subtalker_dosample", do_sample)
         batch = input_ids.shape[0]
-        if batch != 1:
-            raise ValueError("LM-TTS native code predictor currently supports batch size one")
         inputs = torch.cat([last_talker_hidden.reshape(batch, 1, -1),
                             input_embeds.reshape(batch, 1, -1)], dim=1).bfloat16()
-        if do_sample:
-            defaults = self._subtalker_sampling_params
-            sampling = {"temperature": float(param("subtalker_temperature", kwargs.get("temperature") or defaults.get("temperature", 0.9))),
-                        "top_k": int(param("subtalker_top_k", kwargs.get("top_k") if kwargs.get("top_k") is not None else defaults.get("top_k", 50))),
-                        "top_p": float(param("subtalker_top_p", kwargs.get("top_p") or defaults.get("top_p", 1.0))),
-                        "generator": kwargs.get("generator")}
-            residual_codes, _ = self._native_cp.eager(inputs, sampling=sampling)
-        else:
-            residual_codes, _ = self._native_cp.run(inputs, use_graph=not torch.cuda.is_current_stream_capturing())
+        defaults = self._subtalker_sampling_params
+        generators = kwargs.get("generators")
+        options = []
+        for index in range(batch):
+            info = infos[index] if index < len(infos) else {}
+            def param(name, default):
+                value = info.get(name, default)
+                return value[0] if isinstance(value, list) and value else value
+            if not param("subtalker_dosample", do_sample):
+                options.append(None)
+                continue
+            options.append({
+                "temperature": float(param("subtalker_temperature", kwargs.get("temperature") or defaults.get("temperature", 0.9))),
+                "top_k": int(param("subtalker_top_k", kwargs.get("top_k") if kwargs.get("top_k") is not None else defaults.get("top_k", 50))),
+                "top_p": float(param("subtalker_top_p", kwargs.get("top_p") or defaults.get("top_p", 1.0))),
+                "generator": generators[index] if generators is not None else kwargs.get("generator"),
+            })
+        residual_codes, _ = self._native_cp.run_batch(
+            inputs, sampling=options, use_graph=not torch.cuda.is_current_stream_capturing())
         codes = torch.cat([input_ids.reshape(batch, 1).long(), residual_codes], dim=1)
         invalid = (codes[:, :1] < 0) | (codes[:, :1] >= self._codebook_vocab_size)
         codes = torch.where(invalid, torch.zeros_like(codes), codes)

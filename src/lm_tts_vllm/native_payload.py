@@ -27,3 +27,32 @@ def talker2code2wav_full_payload(transfer_manager, pooling_output, request):
             pooling_output["codes.audio"] = reference_frames(
                 audio, list(getattr(request, "output_token_ids", None) or []))
     return upstream(transfer_manager, pooling_output, request)
+
+
+def reference_stream_frame(output, request, is_finished=False):
+    """Apply the same final-token convention to incremental codec delivery."""
+    ids = list(getattr(request, "output_token_ids", None) or [])
+    finished = is_finished or request.is_finished()
+    if isinstance(output, dict) and finished and ids and ids[-1] != 2150:
+        output = dict(output)
+        output["meta"] = dict(output.get("meta") or {}, codec_frame_valid=False)
+    return output
+
+
+def talker2code2wav_async_chunk(transfer_manager, multimodal_output, request, is_finished=False):
+    from vllm_omni.model_executor.stage_input_processors.qwen3_tts import (
+        talker2code2wav_async_chunk as upstream,
+    )
+    return upstream(transfer_manager, reference_stream_frame(multimodal_output, request, is_finished),
+                    request, is_finished)
+
+
+def talker2code2wav_async_chunk_batch(transfer_manager, pooling_outputs, requests, is_finished):
+    from vllm_omni.model_executor.stage_input_processors.qwen3_tts import (
+        talker2code2wav_async_chunk_batch as upstream,
+    )
+    if not len(pooling_outputs) == len(requests) == len(is_finished):
+        raise ValueError("Streaming batch metadata lengths differ")
+    outputs = [reference_stream_frame(output, request, finished)
+               for output, request, finished in zip(pooling_outputs, requests, is_finished)]
+    return upstream(transfer_manager, outputs, requests, is_finished)

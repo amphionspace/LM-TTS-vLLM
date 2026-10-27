@@ -57,6 +57,8 @@ def register():
     register_pipeline(replace(
         QWEN3_TTS_PIPELINE, model_type="lm_tts", model_arch="LMTTSForConditionalGeneration",
         stages=(replace(QWEN3_TTS_PIPELINE.stages[0], custom_process_next_stage_input_func=
-                        "lm_tts_vllm.native_payload.talker2code2wav_full_payload"),
+                        "lm_tts_vllm.native_payload.talker2code2wav_full_payload",
+                        async_chunk_process_next_stage_input_func=
+                        "lm_tts_vllm.native_payload.talker2code2wav_async_chunk"),
                 QWEN3_TTS_PIPELINE.stages[1]),
         default_deploy_config_name=str(Path(__file__).with_name("native_validation.yaml"))))

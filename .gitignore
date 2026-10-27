@@ -3,8 +3,10 @@ __pycache__/
 .pytest_cache/
 .venv*/
 artifacts/
+/artifacts
 results/
 vendor-reference/
+/vendor-reference
 build/
 dist/
 :memory:.ses

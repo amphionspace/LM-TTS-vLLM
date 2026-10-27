@@ -147,6 +147,25 @@ class CodePredictor:
         self.graph = graph
 
     @torch.inference_mode()
+    def run_batch(self, inputs, sampling=None, use_graph=True):
+        """Request-isolated residual decoding for a scheduler batch.
+
+        Reuse the verified frame-local implementation per row. Talker is
+        batched by vLLM; CP vectorization can be optimized independently.
+        """
+        if inputs.ndim != 3 or inputs.shape[1:] != (2, self.config["hidden_size"]):
+            raise ValueError("Expected code predictor inputs [batch, 2, hidden_size]")
+        if inputs.shape[0] == 0:
+            raise ValueError("Code predictor batch cannot be empty")
+        options = [None] * len(inputs) if sampling is None else sampling
+        if len(options) != len(inputs):
+            raise ValueError("Each request must have its own sampling configuration")
+        outputs = [self.run(row, use_graph=use_graph) if option is None
+                   else self.eager(row, sampling=option)
+                   for row, option in zip(inputs, options)]
+        return tuple(torch.cat([output[i] for output in outputs], dim=0) for i in range(2))
+
+    @torch.inference_mode()
     def run(self, inputs, use_graph=True):
         if inputs.shape not in [(2, self.config["hidden_size"]), (1, 2, self.config["hidden_size"])]:
             raise ValueError("Code predictor supports one hidden state plus one first-codebook embedding")

@@ -27,14 +27,18 @@ def main():
 
     def synthesize(mode, model, ref_audio, ref_text, text, language, temperature, top_k, top_p,
                    penalty, greedy_cp, cp_temperature, cp_top_k, cp_top_p, seed, max_tokens,
+                   x_vector_only_mode, non_streaming_mode,
                    progress=gr.Progress()):
-        if not ref_audio or not ref_text.strip() or not text.strip():
-            raise gr.Error('请提供参考音频、参考文本和要合成的文本')
+        if not ref_audio or not text.strip():
+            raise gr.Error('请提供参考音频和要合成的文本')
+        if not x_vector_only_mode and not ref_text.strip():
+            raise gr.Error('ICL 克隆需要参考文本')
         progress(0, desc='正在合成；首次加载或切换模型可能需要数分钟')
         data = dict(mode=mode, model=model, ref_audio=ref_audio, ref_text=ref_text, text=text, language=language,
                     temperature=float(temperature), top_k=int(top_k), top_p=float(top_p), penalty=float(penalty),
                     greedy_cp=bool(greedy_cp), cp_temperature=float(cp_temperature), cp_top_k=int(cp_top_k),
-                    cp_top_p=float(cp_top_p), seed=int(seed), max_tokens=int(max_tokens))
+                    cp_top_p=float(cp_top_p), seed=int(seed), max_tokens=int(max_tokens),
+                    x_vector_only_mode=bool(x_vector_only_mode), non_streaming_mode=bool(non_streaming_mode))
         req = urllib.request.Request(f'http://127.0.0.1:{ports[mode]}/synthesize',
                                      data=json.dumps(data).encode(), headers={'Content-Type': 'application/json'})
         try:
@@ -58,6 +62,8 @@ def main():
                 model = gr.Dropdown([('Emilia step-56384', '56384'), ('训练 checkpoint step-100', '100')], value='56384', label='模型')
                 ref_audio = gr.Audio(value=REFERENCE, type='filepath', label='参考音频（最长 30 秒）')
                 ref_text = gr.Textbox(value='在此奉劝大家别乱打美白针。', label='参考音频文本', lines=2)
+                x_vector_only_mode = gr.Checkbox(value=False, label='仅克隆说话人音色（无需参考文本）')
+                non_streaming_mode = gr.Checkbox(value=True, label='一次性输入文本（关闭使用交错文本条件，不影响音频返回方式）')
                 text = gr.Textbox(value='你好，这是语音合成测试。', label='要合成的文本', lines=3)
                 language = gr.Dropdown(languages, value='Auto', label='语言')
                 preset = gr.Radio(list(PRESETS), value='评测默认采样', label='采样预设')
@@ -78,7 +84,8 @@ def main():
                 info = gr.Markdown('首次加载及切换模型可能需要数分钟。step-100 是训练早期模型，可能很快结束。')
         preset.change(lambda p: PRESETS[p], preset, [temperature, top_k, top_p, penalty, greedy_cp, cp_temperature, cp_top_k, cp_top_p])
         run.click(synthesize, [mode, model, ref_audio, ref_text, text, language, temperature, top_k, top_p, penalty,
-                              greedy_cp, cp_temperature, cp_top_k, cp_top_p, seed, max_tokens], [audio, info],
+                              greedy_cp, cp_temperature, cp_top_k, cp_top_p, seed, max_tokens,
+                              x_vector_only_mode, non_streaming_mode], [audio, info],
                   api_name='synthesize', concurrency_limit=1)
     demo.queue().launch(server_name='0.0.0.0', server_port=args.port,
                         allowed_paths=[str(ROOT / 'results/demo'), REFERENCE])

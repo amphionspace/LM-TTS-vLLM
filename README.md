@@ -4,12 +4,13 @@
 `tts-demo/app.py` 和 `UltraEval-Audio/scripts/voice_clone_infer.py` 的
 **BF16 + PyTorch SDPA** 推理为数值基准。
 
-数值对齐工具将 Talker backbone 放入 vLLM；文本投影、speaker encoder、16-codebook
-帧的组合、Talker 采样和 waveform 解码沿用原来的 `qwen-tts`。
-code predictor 默认沿用原实现作为对照，也可选择下面的原生 FlashAttention / CUDA graph 路径。
-通过进程隔离保留原 demo 的 Transformers 4.57.3，同时使用 vLLM 所需的
-Transformers 5.x。插件通过 `vllm.general_plugins` 注册 `LMTTSTalkerModel`，
-无需修改 vLLM。
+原生 TTS pipeline 通过 vLLM-Omni 调度 Talker、code predictor 和音频解码。
+Talker / code predictor 使用 FlashAttention，CP 支持 greedy CUDA graph 和
+eager 采样。模型适配代码均位于纯插件包中，无需修改 vLLM。
+
+独立数值对齐工具仍保留原来的 `qwen-tts` 前端与 PyTorch CP 对照路径；它们
+通过进程隔离保留原 demo 的 Transformers 4.57.3，与原生运行时的 Transformers
+5.x 共存。功能兼容范围与实际验证状态见 [Qwen-TTS 兼容矩阵](docs/qwen-compatibility.md)。
 
 ## 包边界与最终启动方式
 
@@ -33,10 +34,11 @@ Transformers 5.x。插件通过 `vllm.general_plugins` 注册 `LMTTSTalkerModel`
 双模式 Gradio 试听页面及启动说明见 [demo.md](docs/demo.md)，界面可选择原
 PyTorch 推理或原生 vLLM 插件，并支持 Talker / CP 采样。
 
-- 支持两份指定模型的 **non-streaming / speaker+ICL / batch size 1** 推理。
-- step-100 的训练是 mixed interleaved 5×10，但也支持 non-streaming；本入口明确
-  使用与 demo 相同的 non-streaming 协议，**不将它当成 interleaved streaming 评测**。
-- 通过 vLLM causal pooling 获取未归一化的最后一个 hidden state，每步提交完整 embedding
+- 两份指定模型的 speaker+ICL 推理已验证；开发分支新增仅 speaker embedding
+  克隆、两种文本条件方式与混合批量请求，逐项验证记录见兼容矩阵。
+- step-100 的训练是 mixed interleaved 5×10。Qwen 的 `non_streaming_mode=False`
+  文本条件方式、训练的交错协议以及音频分块返回是不同概念，需分别验证。
+- 旧数值对齐工具通过 vLLM causal pooling 获取未归一化的最后一个 hidden state，每步提交完整 embedding
   前缀。`--engine-mode reference` 重算前缀；`--engine-mode cached` 使用 vLLM 基于
   embedding 内容哈希的 prefix cache，复用完整的 16-token KV blocks，只计算未命中的尾部。
   两者都仍有逐帧 IPC，尚不是完整的高吞吐 serving 实现。

@@ -27,8 +27,10 @@ def main():
     class Request(BaseModel):
         model: str = '56384'
         ref_audio: str
-        ref_text: str
+        ref_text: str = ''
         text: str
+        x_vector_only_mode: bool = False
+        non_streaming_mode: bool = True
         language: str = 'Auto'
         temperature: float = Field(default=0.9, ge=0, le=2)
         top_k: int = Field(default=50, ge=0, le=2048)
@@ -84,8 +86,10 @@ def main():
     @app.post('/synthesize')
     def synthesize(req: Request):
         try:
-            if not req.text.strip() or not req.ref_text.strip():
-                raise ValueError('参考文本和目标文本不能为空')
+            if not req.text.strip():
+                raise ValueError('目标文本不能为空')
+            if not req.x_vector_only_mode and not req.ref_text.strip():
+                raise ValueError('ICL 克隆需要参考文本')
             audio_info = sf.info(req.ref_audio)
             if not 0 < audio_info.duration <= 30:
                 raise ValueError('参考音频须在 0–30 秒之间')
@@ -97,10 +101,10 @@ def main():
                 started = time.perf_counter()
                 codes = None
                 if args.mode == 'pytorch':
-                    prompt = engine.create_voice_clone_prompt(ref_audio=req.ref_audio, ref_text=req.ref_text.strip(), x_vector_only_mode=False)
+                    prompt = engine.create_voice_clone_prompt(ref_audio=req.ref_audio, ref_text=req.ref_text.strip(), x_vector_only_mode=req.x_vector_only_mode)
                     wavs, rate = engine.generate_voice_clone(
                         text=[req.text.strip()], language=[req.language], voice_clone_prompt=prompt,
-                        non_streaming_mode=True, x_vector_only_mode=False, max_new_tokens=req.max_tokens,
+                        non_streaming_mode=req.non_streaming_mode, x_vector_only_mode=req.x_vector_only_mode, max_new_tokens=req.max_tokens,
                         do_sample=req.temperature > 0, temperature=max(req.temperature, 1e-5), top_k=req.top_k,
                         top_p=req.top_p, repetition_penalty=req.penalty,
                         subtalker_dosample=not req.greedy_cp, subtalker_temperature=req.cp_temperature,
@@ -113,8 +117,8 @@ def main():
                     codec = json.loads((MODELS[req.model]['native'] / 'speech_tokenizer/config.json').read_text())
                     frames = math.ceil(audio_info.frames * codec['input_sample_rate'] / audio_info.samplerate / codec['encode_downsample_rate'])
                     info = {'task_type': ['Base'], 'ref_audio': [req.ref_audio], 'ref_text': [req.ref_text.strip()],
-                            'text': [req.text.strip()], 'language': [req.language], 'x_vector_only_mode': [False],
-                            'non_streaming_mode': [True], 'max_new_tokens': [req.max_tokens], 'full_utterance_decode': [True],
+                            'text': [req.text.strip()], 'language': [req.language], 'x_vector_only_mode': [req.x_vector_only_mode],
+                            'non_streaming_mode': [req.non_streaming_mode], 'max_new_tokens': [req.max_tokens], 'full_utterance_decode': [True],
                             'ref_code_length': [frames], 'subtalker_dosample': [not req.greedy_cp],
                             'subtalker_temperature': [req.cp_temperature], 'subtalker_top_k': [req.cp_top_k],
                             'subtalker_top_p': [req.cp_top_p]}
