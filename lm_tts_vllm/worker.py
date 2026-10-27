@@ -1,8 +1,6 @@
 """Private local-pipe worker; runs in the isolated vLLM environment."""
 import argparse
-import json
 from multiprocessing.connection import Connection
-from pathlib import Path
 import traceback
 
 
@@ -24,8 +22,7 @@ def main():
         torch.backends.cuda.matmul.allow_tf32 = False
         # v0.32's pooling scoring processor requires an initialized tokenizer,
         # even though this worker only submits already constructed embeddings.
-        source = json.loads((Path(args.model) / "source.json").read_text())["model"]
-        llm = LLM(model=args.model, tokenizer=source, runner="pooling", dtype="bfloat16",
+        llm = LLM(model=args.model, runner="pooling", dtype="bfloat16",
                   enable_prompt_embeds=True,
                   pooler_config=PoolerConfig(task="embed", seq_pooling_type="LAST", use_activation=False),
                   enforce_eager=True, enable_prefix_caching=False,

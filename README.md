@@ -54,8 +54,8 @@ MODEL1="$(realpath ../UltraEval-Audio/init_model/emilia-v4-emilia2-cbinit-langid
 bash scripts/export_step100.sh
 MODEL2="$PWD/artifacts/step-00000100"
 
-$TTS_PYTHON -m vllm_lm_tts.prepare --model "$MODEL1" --output artifacts/backbone-56384
-$TTS_PYTHON -m vllm_lm_tts.prepare --model "$MODEL2" --output artifacts/backbone-100
+$TTS_PYTHON -m lm_tts_vllm.prepare --model "$MODEL1" --output artifacts/backbone-56384
+$TTS_PYTHON -m lm_tts_vllm.prepare --model "$MODEL2" --output artifacts/backbone-100
 ```
 
 `prepare` 提取 Talker 的 layers、norm、codec embedding，保留原权重 dtype；通过
@@ -65,7 +65,7 @@ $TTS_PYTHON -m vllm_lm_tts.prepare --model "$MODEL2" --output artifacts/backbone
 ## 推理与 BF16 对齐
 
 ```bash
-CUDA_VISIBLE_DEVICES=6 $TTS_PYTHON -m vllm_lm_tts.infer \
+CUDA_VISIBLE_DEVICES=6 $TTS_PYTHON -m lm_tts_vllm.infer \
   --model "$MODEL1" --backbone artifacts/backbone-56384 \
   --vllm-python "$VLLM_PYTHON" --mode compare \
   --reference-audio ../UltraEval-Audio/raw_data/voice_clone_manifests/seed_tts_eval_zh/000000.wav \
@@ -101,7 +101,7 @@ step-56384 现有评测记录为 `speaker_icl`、`non_streaming=true`、`languag
 sampling、解码与 reference 裁剪，只在每次请求期间替换 Talker backbone：
 
 ```bash
-CUDA_VISIBLE_DEVICES=6 $TTS_PYTHON -m vllm_lm_tts.ultraeval \
+CUDA_VISIBLE_DEVICES=6 $TTS_PYTHON -m lm_tts_vllm.ultraeval \
   --ultraeval-root ../UltraEval-Audio \
   --backbone artifacts/backbone-56384 --vllm-python "$VLLM_PYTHON" \
   --worker-log "$PWD/results/eval-56384-vllm.log" -- \

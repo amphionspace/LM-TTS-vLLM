@@ -54,7 +54,7 @@ def main():
         args.worker_log.with_suffix(".plugin.json").write_text(json.dumps({
             "worker": worker.info, "precision_profile": args.precision_profile,
             "backbone": str(Path(args.backbone).resolve()), "evaluation_args": forwarded,
-            "implementation": "vllm-lm-tts", "layout": "non_streaming"}, indent=2) + "\n")
+            "implementation": "lm-tts-vllm", "layout": "non_streaming"}, indent=2) + "\n")
         script = args.ultraeval_root / "scripts/voice_clone_infer.py"
         old_argv = sys.argv
         try:

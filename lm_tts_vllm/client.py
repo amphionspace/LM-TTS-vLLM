@@ -21,7 +21,7 @@ class TalkerWorker:
         env["TOKENIZERS_PARALLELISM"] = "false"
         try:
             self.process = subprocess.Popen(
-                [str(python), "-m", "vllm_lm_tts.worker", "--fd", str(right.fileno()), "--model", str(model)],
+                [str(python), "-m", "lm_tts_vllm.worker", "--fd", str(right.fileno()), "--model", str(model)],
                 pass_fds=(right.fileno(),), env=env, stdout=self.log, stderr=subprocess.STDOUT)
         finally:
             right.close()

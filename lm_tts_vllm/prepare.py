@@ -3,6 +3,7 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
+import shutil
 
 
 def prepare(source, output):
@@ -39,6 +40,10 @@ def prepare(source, output):
     output.mkdir(parents=True, exist_ok=False)
     save_file(weights, str(output / "model.safetensors"))
     (output / "config.json").write_text(json.dumps(config, indent=2) + "\n")
+    for name in ["tokenizer.json", "tokenizer_config.json", "special_tokens_map.json",
+                 "added_tokens.json", "vocab.json", "merges.txt"]:
+        if (source / name).is_file():
+            shutil.copy2(source / name, output / name)
     (output / "source.json").write_text(json.dumps({"model": str(source),
         "config_sha256": hashlib.sha256((source / "config.json").read_bytes()).hexdigest(),
         "tensor_count": len(weights)}, indent=2) + "\n")

@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "vllm-lm-tts"
+name = "lm-tts-vllm"
 version = "0.1.0"
 description = "Qwen3-TTS Talker plugin and BF16 parity harness for vLLM 0.32.0"
 requires-python = ">=3.11"
@@ -12,7 +12,7 @@ requires-python = ">=3.11"
 engine = ["vllm==0.32.0"]
 
 [project.entry-points."vllm.general_plugins"]
-lm_tts = "vllm_lm_tts:register"
+lm_tts = "lm_tts_vllm:register"
 
 [tool.setuptools.packages.find]
-include = ["vllm_lm_tts*"]
+include = ["lm_tts_vllm*"]

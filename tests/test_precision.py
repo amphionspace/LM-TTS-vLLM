@@ -4,7 +4,7 @@ import unittest
 import torch
 from torch import nn
 
-from vllm_lm_tts.precision import BFloatRope, rms_forward, split_linear
+from lm_tts_vllm.precision import BFloatRope, rms_forward, split_linear
 
 
 class PrecisionTests(unittest.TestCase):

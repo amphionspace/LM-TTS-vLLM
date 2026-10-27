@@ -2,5 +2,5 @@ def register():
     from vllm import ModelRegistry
 
     ModelRegistry.register_model(
-        "LMTTSTalkerModel", "vllm_lm_tts.model:LMTTSTalkerModel"
+        "LMTTSTalkerModel", "lm_tts_vllm.model:LMTTSTalkerModel"
     )
