@@ -77,7 +77,7 @@ def main():
                     cp_top_k = gr.Slider(0, 100, value=50, step=1, label='Code predictor top-k（0 不限制）')
                     cp_top_p = gr.Slider(0.05, 1, value=1, step=0.05, label='Code predictor top-p')
                     seed = gr.Number(value=42, precision=0, label='随机种子')
-                    max_tokens = gr.Slider(2, 1024, value=512, step=1, label='最大生成帧数')
+                    max_tokens = gr.Slider(2, 2048, value=512, step=1, label='最大生成帧数')
                 run = gr.Button('合成', variant='primary')
             with gr.Column():
                 audio = gr.Audio(label='合成结果')

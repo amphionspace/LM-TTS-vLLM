@@ -2,6 +2,23 @@
 import torch
 
 
+def normalize_voice_prompt(info):
+    """Restore JSON codec matrices before the upstream tensor-only ICL path."""
+    raw = info.get("voice_clone_prompt")
+    prompt = raw[0] if isinstance(raw, list) and raw else raw
+    if not isinstance(prompt, dict) or not isinstance(prompt.get("ref_code"), list):
+        return info
+    codes = torch.as_tensor(prompt["ref_code"], dtype=torch.long)
+    if codes.ndim == 3 and codes.shape[0] == 1:
+        codes = codes[0]
+    if codes.ndim != 2 or codes.shape[1] != 16 or codes.shape[0] == 0:
+        raise ValueError("voice_clone_prompt.ref_code must have shape [frames, 16]")
+    if (codes < 0).any() or (codes >= 2048).any():
+        raise ValueError("Reference codec IDs must be in [0, 2048)")
+    prompt = dict(prompt, ref_code=codes)
+    return dict(info, voice_clone_prompt=[prompt] if isinstance(raw, list) else prompt)
+
+
 def reference_frames(audio, output_token_ids):
     if not isinstance(audio, torch.Tensor) or audio.ndim != 2 or not audio.numel():
         return audio
@@ -32,8 +49,11 @@ def talker2code2wav_full_payload(transfer_manager, pooling_output, request):
 def reference_stream_frame(output, request, is_finished=False):
     """Apply the same final-token convention to incremental codec delivery."""
     ids = list(getattr(request, "output_token_ids", None) or [])
+    # Native MRv2 streaming snapshots omit the full history to avoid O(T²)
+    # copies and expose just the latest token separately.
+    last = ids[-1] if ids else getattr(request, "last_output_token_id", None)
     finished = is_finished or request.is_finished()
-    if isinstance(output, dict) and finished and ids and ids[-1] != 2150:
+    if isinstance(output, dict) and finished and last is not None and last != 2150:
         output = dict(output)
         output["meta"] = dict(output.get("meta") or {}, codec_frame_valid=False)
     return output

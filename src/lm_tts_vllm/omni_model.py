@@ -12,6 +12,7 @@ from vllm_omni.model_executor.models.qwen3_tts.qwen3_tts_talker import (
 
 from .precision import apply_bf16
 from .code_predictor import CodePredictor
+from .native_payload import normalize_voice_prompt
 
 
 class LMTTSForConditionalGeneration(Qwen3TTSTalkerForConditionalGeneration):
@@ -58,10 +59,15 @@ class LMTTSForConditionalGeneration(Qwen3TTSTalkerForConditionalGeneration):
 
     @staticmethod
     def _validate_prompt(info):
+        info.update(normalize_voice_prompt(info))
         mode = info.get("non_streaming_mode")
         mode = mode[0] if isinstance(mode, list) and mode else mode
         if mode is not None and not isinstance(mode, bool):
             raise ValueError("non_streaming_mode must be a boolean")
+
+    def preprocess(self, input_ids, input_embeds, **info):
+        self._validate_prompt(info)
+        return super().preprocess(input_ids, input_embeds, **info)
 
     def preprocess_batch_mrv2(self, *, req_infos, device):
         for info in req_infos:

@@ -41,7 +41,7 @@ def main():
         cp_top_k: int = Field(default=50, ge=0, le=2048)
         cp_top_p: float = Field(default=1, gt=0, le=1)
         seed: int = Field(default=42, ge=0, le=2147483647)
-        max_tokens: int = Field(default=512, ge=2, le=1024)
+        max_tokens: int = Field(default=512, ge=2, le=2048)
 
     app = FastAPI()
     state = {'model': None, 'engine': None, 'tokenizer': None}
@@ -73,8 +73,8 @@ def main():
             load_omni_general_plugins()
             engine = Omni(model=str(MODELS[name]['native']), stage_overrides={
                 '0': {'kv_cache_memory_bytes': 536870912},
-                '1': {'max_model_len': 32768, 'max_num_batched_tokens': 32768,
-                      'default_sampling_params': {'max_tokens': 32768}}})
+                '1': {'max_model_len': 65536, 'max_num_batched_tokens': 65536,
+                      'default_sampling_params': {'max_tokens': 65536}}})
             state['tokenizer'] = AutoTokenizer.from_pretrained(str(MODELS[name]['native']))
         state.update(model=name, engine=engine)
         return engine

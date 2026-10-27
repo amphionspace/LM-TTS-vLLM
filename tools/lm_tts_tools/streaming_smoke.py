@@ -50,6 +50,7 @@ async def run(args):
         params[0].seed = 42
         params[0].extra_args = {'tts_local_seed': 42}
         start, chunks, final = time.perf_counter(), [], None
+        audio_parts = []
         async for output in engine.generate(
                 {'prompt_token_ids': [0] * length, 'additional_information': info},
                 request_id='stream-cap', sampling_params_list=params):
@@ -59,13 +60,13 @@ async def run(args):
                 continue
             audio = torch.cat(audio, dim=-1) if isinstance(audio, list) else audio
             assert audio.numel() > 0 and torch.isfinite(audio).all()
+            audio_parts.append(audio.float().cpu().flatten())
             sr = mm['sr'][-1] if isinstance(mm['sr'], list) else mm['sr']
             row = {'finished': output.finished, 'samples': audio.numel(),
                    'elapsed_seconds': time.perf_counter() - start}
             print(json.dumps(row), flush=True)
             if output.finished:
                 final = row
-                sf.write(args.output / 'final.wav', audio.float().cpu().numpy().flatten(), int(sr))
                 codes = mm.get('codec_frames')
                 if codes is not None:
                     codes = torch.cat(codes, dim=0) if isinstance(codes, list) else codes
@@ -75,11 +76,13 @@ async def run(args):
                 sf.write(args.output / f'chunk-{len(chunks)}.wav',
                          audio.float().cpu().numpy().flatten(), int(sr))
                 chunks.append(row)
-        report = {'chunks': chunks, 'final': final}
+        complete_audio = torch.cat(audio_parts)
+        sf.write(args.output / 'final.wav', complete_audio.numpy(), int(sr))
+        report = {'chunks': chunks, 'final': final, 'total_samples': complete_audio.numel()}
         (args.output / 'report.json').write_text(json.dumps(report, indent=2) + '\n')
         assert final is not None, 'Missing final output'
         assert len(chunks) > 1, 'No real incremental audio delivery'
-        assert final['samples'] == 79 * 1920, 'Capped generation must retain 79 codec frames'
+        assert complete_audio.numel() == 79 * 1920, 'Capped generation must retain 79 codec frames'
     finally:
         engine.close()
 

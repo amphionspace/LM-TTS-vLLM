@@ -11,7 +11,7 @@
 - 开发分支新增仅 speaker embedding 克隆（参考文本可空），以及
   `non_streaming_mode` 文本条件切换。关闭该选项不代表音频分块返回。
   已构建并检查新版 UI schema；在线服务仍使用主分支版本。
-- 默认每次最多 512 帧，可调至 1024；参考音频最长 30 秒。两个后端各驻留一个模型，
+- 默认每次最多 512 帧，开发版可调至 2048（在线旧版为 1024）；参考音频最长 30 秒。两个后端各驻留一个模型，
   切换 checkpoint 会重新加载，vLLM 首次加载可能需要数分钟。
 - 两种引擎的 RNG 算法及运算不同，相同 seed 不保证跨引擎生成相同 codec。
   当前完整 BF16 codec 对齐尚未通过；本页用于试听，不执行质量评分。
@@ -20,6 +20,12 @@
 
 ```bash
 PYTORCH_GPU=0 VLLM_GPU=1 bash scripts/run_demo.sh
+```
+
+长期运行可在仓库根目录使用独立 tmux 会话：
+
+```bash
+tmux new-session -d -s lm-tts-demo 'bash scripts/run_demo.sh'
 ```
 
 可用 `TTS_PYTHON`、`OMNI_PYTHON` 覆盖两个环境的 Python 路径，`PORT` 覆盖页面端口。
