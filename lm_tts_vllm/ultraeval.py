@@ -20,6 +20,7 @@ def main():
     parser.add_argument("--vllm-python", required=True)
     parser.add_argument("--worker-log", type=Path, required=True)
     parser.add_argument("--precision-profile", choices=["bf16", "native"], default="bf16")
+    parser.add_argument("--engine-mode", choices=["reference", "cached"], default="reference")
     parser.add_argument("evaluation_args", nargs=argparse.REMAINDER)
     args = parser.parse_args()
     forwarded = args.evaluation_args
@@ -46,13 +47,15 @@ def main():
     args.worker_log.parent.mkdir(parents=True, exist_ok=True)
     if args.worker_log.exists():
         raise FileExistsError(args.worker_log)
-    with TalkerWorker(args.vllm_python, args.backbone, args.worker_log, args.precision_profile) as worker:
+    with TalkerWorker(args.vllm_python, args.backbone, args.worker_log, args.precision_profile,
+                      engine_mode=args.engine_mode) as worker:
         def generate(self, *positional, **kwargs):
             with backbone_override(self, worker):
                 return original(self, *positional, **kwargs)
         Qwen3TTSModel.generate_voice_clone = generate
         args.worker_log.with_suffix(".plugin.json").write_text(json.dumps({
             "worker": worker.info, "precision_profile": args.precision_profile,
+            "engine_mode": args.engine_mode,
             "backbone": str(Path(args.backbone).resolve()), "evaluation_args": forwarded,
             "implementation": "lm-tts-vllm", "layout": "non_streaming"}, indent=2) + "\n")
         script = args.ultraeval_root / "scripts/voice_clone_infer.py"

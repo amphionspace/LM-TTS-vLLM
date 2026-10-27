@@ -95,6 +95,7 @@ def main():
     parser.add_argument("--vllm-python")
     parser.add_argument("--mode", choices=["pytorch", "vllm", "compare"], default="compare")
     parser.add_argument("--precision-profile", choices=["bf16", "native"], default="bf16")
+    parser.add_argument("--engine-mode", choices=["reference", "cached"], default="reference")
     parser.add_argument("--reference-audio", required=True)
     parser.add_argument("--reference-text", required=True)
     parser.add_argument("--text", required=True)
@@ -142,9 +143,13 @@ def main():
         torch.set_rng_state(cpu_rng)
         torch.cuda.set_rng_state(cuda_rng)
         collected = []
+        first_frame_seconds = None
         def collect(module, inputs, output):
+            nonlocal first_frame_seconds
             if output.hidden_states[-1] is not None:
                 collected.append(output.hidden_states[-1].detach().cpu())
+                if first_frame_seconds is None:
+                    first_frame_seconds = time.monotonic() - start
         hook = model.model.talker.register_forward_hook(collect)
         original_generate = model.model.talker.generate
         finish = {}
@@ -154,6 +159,7 @@ def main():
             return result
         model.model.talker.generate = capture_generate
         start = time.monotonic()
+        first_worker_step = len(worker.steps) if worker else 0
         try:
             with backbone_override(model, worker, trace):
                 wavs, rate = model.generate_voice_clone(**settings)
@@ -172,6 +178,13 @@ def main():
                                   "codec_frames": len(frame_codes),
                                   "ended_with_eos": finish["last_token"] == model.model.config.talker_config.codec_eos_token_id,
                                   "reached_token_limit": finish["last_token"] != model.model.config.talker_config.codec_eos_token_id}
+        report["runs"][label]["rtf"] = report["runs"][label]["seconds"] / (len(wav) / rate)
+        report["runs"][label]["first_codec_frame_seconds"] = first_frame_seconds
+        if worker:
+            steps = worker.steps[first_worker_step:]
+            report["runs"][label]["talker_engine_seconds"] = sum(s["seconds"] for s in steps)
+            report["runs"][label]["submitted_tokens"] = sum(s["submitted_tokens"] for s in steps)
+            report["runs"][label]["cached_tokens"] = sum(s["cached_tokens"] or 0 for s in steps)
         (out / "report.json").write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n")
 
     trace = []
@@ -196,11 +209,13 @@ def main():
         if trace:
             torch.save(trace, out / "trace.pt")
     if args.mode in {"vllm", "compare"}:
-        with TalkerWorker(args.vllm_python, args.backbone, out / "vllm.log", args.precision_profile) as worker:
+        with TalkerWorker(args.vllm_python, args.backbone, out / "vllm.log", args.precision_profile,
+                          engine_mode=args.engine_mode) as worker:
             report["worker"] = worker.info
             if trace:
                 report["teacher_forced"] = audit(model, worker, trace)
                 (out / "report.json").write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n")
+                worker.reset_cache()
             generate("vllm", worker=worker)
     if len(codes) == 2:
         a, b = codes["pytorch"], codes["vllm"]

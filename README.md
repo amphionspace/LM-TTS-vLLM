@@ -15,9 +15,12 @@ Transformers 5.x。插件通过 `vllm.general_plugins` 注册 `LMTTSTalkerModel`
 - 支持两份指定模型的 **non-streaming / speaker+ICL / batch size 1** 推理。
 - step-100 的训练是 mixed interleaved 5×10，但也支持 non-streaming；本入口明确
   使用与 demo 相同的 non-streaming 协议，**不将它当成 interleaved streaming 评测**。
-- 这是精度验证实现：通过 vLLM causal pooling 获取未归一化的最后一个 hidden state，
-  每步重新提交完整 embedding 前缀。没有跨音频帧复用 KV cache，没有宣称吞吐加速。
-- TP/PP 固定为 1，关闭 CUDA graph、prefix caching 和量化。
+- 通过 vLLM causal pooling 获取未归一化的最后一个 hidden state，每步提交完整 embedding
+  前缀。`--engine-mode reference` 重算前缀；`--engine-mode cached` 使用 vLLM 基于
+  embedding 内容哈希的 prefix cache，复用完整的 16-token KV blocks，只计算未命中的尾部。
+  两者都仍有逐帧 IPC，尚不是完整的高吞吐 serving 实现。
+- 当前 TP/PP 固定为 1，关闭 CUDA graph 和量化。这是验证阶段的设置，完整实现必须同时
+  验收精度和速度，见 [性能与精度验收](docs/performance.md)。
 - `bf16` profile 保留原 PyTorch 的 RMSNorm、残差、RoPE、SiLU 乘法的舍入边界，并分别
   计算 Q/K/V 和 gate/up 投影；attention 仍使用 vLLM FlashAttention backend。
   `native` profile 保留 vLLM 原生融合算子，可用于误差对照。
@@ -86,6 +89,8 @@ CUDA_VISIBLE_DEVICES=6 $TTS_PYTHON -m lm_tts_vllm.infer \
   Talker repetition penalty=1.05）。相同随机种子不保证不同 logits 采到同一 token。
 - demo 的低温 preset：`--temperature 0.3 --top-k 10 --repetition-penalty 2.0 --code-predictor-greedy`。
 - `--precision-profile native`：对照 vLLM 原始融合算子。
+- `--engine-mode cached`：验证 KV cache 复用；teacher-forced 完成后先清空缓存，再测自由生成，
+  避免参考 trace 预先填满缓存而美化速度结果。
 - `--reference-run results/已有基线`：重放已保存的相同请求，避免重复基线推理。
 
 `report.json` 包含运行版本、逐步 hidden/logits 误差、有效 codec 范围内的原始 argmax
@@ -93,6 +98,8 @@ CUDA_VISIBLE_DEVICES=6 $TTS_PYTHON -m lm_tts_vllm.infer \
 argmax 比较尚未施加 repetition penalty，不等同于最终采样决策。
 `reached_token_limit=true` 表示音频达到生成上限，不应当作自然 EOS 完成的样本。
 `*-codes.npy` 是生成 codebook 序列，`*.wav` 是 24 kHz 音频，`trace.pt` 用于重放。
+新运行同时记录 RTF、首个 codec frame 延迟、Talker engine 耗时和 prefix cache 命中量。
+首个 codec frame 延迟不等于首个可播放音频的延迟；当前入口在完整解码后才输出 WAV。
 
 ## 沿用 UltraEval 的实际入口
 

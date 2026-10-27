@@ -7,10 +7,11 @@ import subprocess
 
 
 class TalkerWorker:
-    def __init__(self, python, model, log, precision="bf16", timeout=900):
+    def __init__(self, python, model, log, precision="bf16", timeout=900, engine_mode="reference"):
         left, right = socket.socketpair()
         self.connection = Connection(left.detach())
         self.timeout = timeout
+        self.steps = []
         self.log = open(log, "w")
         env = os.environ.copy()
         root = str(Path(__file__).resolve().parents[1])
@@ -21,7 +22,8 @@ class TalkerWorker:
         env["TOKENIZERS_PARALLELISM"] = "false"
         try:
             self.process = subprocess.Popen(
-                [str(python), "-m", "lm_tts_vllm.worker", "--fd", str(right.fileno()), "--model", str(model)],
+                [str(python), "-m", "lm_tts_vllm.worker", "--fd", str(right.fileno()), "--model", str(model),
+                 "--engine-mode", engine_mode],
                 pass_fds=(right.fileno(),), env=env, stdout=self.log, stderr=subprocess.STDOUT)
         finally:
             right.close()
@@ -47,8 +49,15 @@ class TalkerWorker:
         if embeddings.ndim != 3 or embeddings.shape[0] != 1:
             raise ValueError("Parity frontend supports a single unpadded utterance")
         self.connection.send(embeddings[0].detach().float().cpu().numpy())
-        result = self.receive()["hidden"]
+        response = self.receive()
+        result = response.pop("hidden")
+        self.steps.append(response)
         return torch.from_numpy(result).to(embeddings).reshape(1, 1, -1)
+
+    def reset_cache(self):
+        self.connection.send({"reset_cache": True})
+        if not self.receive()["reset"]:
+            raise RuntimeError("Could not reset the prefix cache before free-running measurement")
 
     def close(self):
         if getattr(self, "process", None) is not None:
