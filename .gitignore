@@ -5,3 +5,5 @@ __pycache__/
 artifacts/
 results/
 vendor-reference/
+build/
+dist/

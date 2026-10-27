@@ -22,6 +22,7 @@ def main():
     parser.add_argument("--precision-profile", choices=["bf16", "native", "sdpa"], default="bf16")
     parser.add_argument("--engine-mode", choices=["reference", "cached"], default="reference")
     parser.add_argument("--attention-backend", choices=["FLASH_ATTN", "FLASHINFER", "TRITON_ATTN"], default="FLASH_ATTN")
+    parser.add_argument("--code-predictor-engine", choices=["pytorch", "vllm-eager", "vllm-graph"], default="pytorch")
     parser.add_argument("evaluation_args", nargs=argparse.REMAINDER)
     args = parser.parse_args()
     if args.precision_profile == "sdpa" and args.engine_mode != "reference":
@@ -36,7 +37,11 @@ def main():
     check.add_argument("--batch-size", type=int, default=1)
     check.add_argument("--model-path", required=True)
     check.add_argument("--conditioning", required=True)
+    check.add_argument("--greedy", action="store_true")
+    check.add_argument("--code-predictor-greedy", action="store_true")
     selected, _ = check.parse_known_args(forwarded)
+    if args.code_predictor_engine != "pytorch" and not (selected.greedy or selected.code_predictor_greedy):
+        parser.error("Native code predictor currently requires --greedy or --code-predictor-greedy")
     if not selected.non_streaming or selected.batch_size != 1 or selected.conditioning != "speaker_icl":
         parser.error("This adapter requires --non-streaming --batch-size 1 --conditioning speaker_icl")
     source = json.loads((Path(args.backbone) / "source.json").read_text())["model"]
@@ -51,7 +56,8 @@ def main():
     if args.worker_log.exists():
         raise FileExistsError(args.worker_log)
     with TalkerWorker(args.vllm_python, args.backbone, args.worker_log, args.precision_profile,
-                      engine_mode=args.engine_mode, attention_backend=args.attention_backend) as worker:
+                      engine_mode=args.engine_mode, attention_backend=args.attention_backend,
+                      code_predictor_engine=args.code_predictor_engine) as worker:
         def generate(self, *positional, **kwargs):
             with backbone_override(self, worker):
                 return original(self, *positional, **kwargs)

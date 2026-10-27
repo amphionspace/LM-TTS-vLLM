@@ -50,7 +50,7 @@ codec 数组和音频。大文件不进入 Git；上述表格保留可审阅的�
 
 ## 原评测入口冒烟测试
 
-`lm_tts_vllm.ultraeval` 已执行原 `voice_clone_infer.py` 的 Seed-TTS 中文首条输入，
+`lm_tts_tools.ultraeval` 已执行原 `voice_clone_infer.py` 的 Seed-TTS 中文首条输入，
 step-100、BF16 cached、non-streaming、Auto、batch=1。原 journal 返回 `status=ok`，
 24 kHz / 0.56 秒，speaker embedding 与 ICL 调用都通过原入口的检查。
 结果在 `results/ultraeval-100-smoke`。这只是推理接口验证，不是质量评分。
@@ -87,3 +87,62 @@ vLLM `FLASH_ATTN`。第一层 RMSNorm、Q/K/V 投影、Q/K norm，以及经过 R
 0.000001909，相对 L2 约 0.0001916。由此可以把这条路径上的初始差异定位到
 attention 计算，而不是前端输入、QKV 投影或 RoPE。后续层和 code predictor
 会继续传播、放大差异；这个定位结果不等于完整 codec 一致性已经通过。
+
+## 原生 attention backend 对照
+
+同一 step-56384 greedy 请求，均使用 prefix cache；以下没有 SDPA 替换：
+
+| backend | teacher-forced argmax | 最大 logits 绝对误差 | 首个完整帧分歧 | 输出帧数 |
+| --- | ---: | ---: | ---: | ---: |
+| FLASH_ATTN | 100% | 0.1875 | 0 | 77 |
+| TRITON_ATTN | 100% | 0.125 | 1 | 79 |
+| FLASHINFER | 100% | 0.1875 | 0 | 79 |
+
+结果分别在 `56384-cached-greedy`、`56384-triton-cached-greedy` 和
+`56384-flashinfer-cached-greedy`。这不支持只凭单句最大误差更低就更改默认 backend。
+
+进一步固定第一帧首码本 1174，仅替换 code predictor 的 Talker hidden 输入，
+重现了 residual codebook 5 的分歧：基线 token 810 与 1412 的 logits 都为 8.0625，
+替换 hidden 后变为 8.0 与 8.0625。原 hidden 路径精确重现已保存的首帧码本。
+产物为 `56384-layer-audit-qkv/code-predictor-margin.json`；它说明该处存在 BF16
+平局敏感性，不应把所有 greedy 分歧都归为协议错误，也不能据此跳过数值检查。
+
+同一保存的 attention 输入在原 Torch 2.8 环境重放，通过 profiler 确认 SDPA 调用
+`aten::_scaled_dot_product_flash_attention`，且输出精确等于基线保存值。
+因此这里的基线 SDPA 不是纯 math attention；它与 vLLM FA2 是不同的执行路径。
+
+## 原生 code predictor 与 CUDA graph
+
+插件内的新 code predictor 使用 vLLM FlashAttention 2、BF16 和帧内增量 KV cache，
+支持 greedy 的 15 步 CUDA graph，不依赖 Qwen-TTS 或 Transformers，也不调用 SDPA。
+独立测试覆盖 step-56384 的 8 个帧输入、step-100 的 5 个帧输入：
+
+- 13 个输入的原生 eager 与 CUDA graph，码本和 logits 均逐元素一致。
+- 交替输入后重用第一个输入，结果一致；帧内 cache 未观察到跨调用残留。
+- 与原 PyTorch 相比，step-56384 有 5/8 个输入的完整 residual codes 一致，
+  teacher-forced 最大 logits 误差 0.15625；step-100 为 5/5 一致，最大误差 0.03125。
+- CP graph 独立微基准的中位耗时分别约 12.33 ms 和 12.37 ms；原 PyTorch
+  这些输入的暖调用约 69–81 ms。条件并非完整 serving 基准，不据此发布端到端倍数。
+
+微基准原始数据在 `cp-native-{56384,100}.json`；
+`cp-native-{56384,100}-cli.json` 保留可复现工具的复验结果；图与 eager 一致性、
+有限值和 cache 重用是强制检查。step-100 还通过了原码本严格一致性门槛。
+
+整链路使用 `--engine-mode cached --code-predictor-engine vllm-graph --greedy`：
+
+| 模型 | PyTorch / vLLM 帧数 | vLLM 音频秒数 | vLLM 耗时 | RTF | 首个码本帧分歧 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| step-56384 | 79 / 79 | 6.32 | 4.523 s | 0.716 | 1 |
+| step-100 | 2 / 2 | 0.16 | 0.266 s | 1.665 | 1 |
+
+两组都没有通过原 PyTorch 的严格全 codec 一致性；step-56384 两边到达长度上限，
+step-100 两边自然 EOS。step-56384 CP 累计约 1.000 s，Talker engine 累计 2.902 s。
+这两次测试和其他任务共享 GPU，属于集成冒烟数据，尚非正式速度验收。
+
+## 插件与工具拆分
+
+主 wheel 仅含 `lm_tts_vllm/{__init__,model,precision,code_predictor}.py`，
+开发工具位于独立 `lm-tts-vllm-tools` wheel。检查确认主包不导入工具、
+Qwen-TTS 或自定义进程启动代码；SDPA 替换诊断也已移到工具包。
+这轮推理移除了工具中的显式 `register()` 调用，模型通过安装包 entry point 自动注册。
+当前仍是 pooling 对齐通路，最终原生完整 TTS 启动与音频输出接口留到后续整体验证。

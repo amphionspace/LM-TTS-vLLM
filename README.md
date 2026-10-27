@@ -5,10 +5,25 @@
 **BF16 + PyTorch SDPA** 推理为数值基准。
 
 本实现将 Talker backbone 放入 vLLM；文本投影、speaker encoder、16-codebook
-帧的组合、code predictor、采样和 waveform 解码沿用原来的 `qwen-tts`。
+帧的组合、Talker 采样和 waveform 解码沿用原来的 `qwen-tts`。
+code predictor 默认沿用原实现作为对照，也可选择下面的原生 FlashAttention / CUDA graph 路径。
 通过进程隔离保留原 demo 的 Transformers 4.57.3，同时使用 vLLM 所需的
 Transformers 5.x。插件通过 `vllm.general_plugins` 注册 `LMTTSTalkerModel`，
 无需修改 vLLM。
+
+## 包边界与最终启动方式
+
+- `src/lm_tts_vllm/`：纯 vLLM 插件，只包含注册、模型和计算实现。主 wheel 不包含工具包，
+  不导入 Qwen-TTS 前端，不创建自定义 client/worker，也不包含 SDPA 替换诊断。
+- `tools/lm_tts_tools/`：独立开发工具包，包含转换、基线、对齐、UltraEval 适配以及环境隔离进程。
+  `tools/pyproject.toml` 可以单独安装；运行插件不要求安装它。
+- `tests/`、`docs/`、`scripts/`：验证、记录与开发辅助，不属于插件的运行依赖。
+
+最终启动约定是安装插件后由 vLLM 自动加载 `vllm.general_plugins` entry point，
+用户不需要另行启动本仓库的 client 或 worker。当前已注册的 `LMTTSTalkerModel`
+仍是用于对齐的 Talker pooling 模型，**尚不是可用 `vllm serve` 完整生成音频的 TTS 接口**。
+后者还需要把完整生成状态与音频输出协议接入原生运行链路，不能把转换后的 backbone
+加载成功当成端到端 TTS 服务已完成。
 
 ## 当前边界
 
@@ -19,7 +34,8 @@ Transformers 5.x。插件通过 `vllm.general_plugins` 注册 `LMTTSTalkerModel`
   前缀。`--engine-mode reference` 重算前缀；`--engine-mode cached` 使用 vLLM 基于
   embedding 内容哈希的 prefix cache，复用完整的 16-token KV blocks，只计算未命中的尾部。
   两者都仍有逐帧 IPC，尚不是完整的高吞吐 serving 实现。
-- 当前 TP/PP 固定为 1，关闭 CUDA graph 和量化。这是验证阶段的设置，完整实现必须同时
+- 当前 TP/PP 固定为 1，Talker 关闭 CUDA graph 和量化，code predictor 可独立启用 graph。
+  这是验证阶段的设置，完整实现必须同时
   验收精度和速度，见 [性能与精度验收](docs/performance.md)。
 - `bf16` profile 保留原 PyTorch 的 RMSNorm、残差、RoPE、SiLU 乘法的舍入边界，并分别
   计算 Q/K/V 和 gate/up 投影；attention 仍使用 vLLM FlashAttention backend。
@@ -39,7 +55,7 @@ python3.12 -m venv .venv-vllm
 # 前后处理：使用原 demo / evaluation 环境
 export TTS_PYTHON=../envs/lm-tts/bin/python
 export VLLM_PYTHON="$PWD/.venv-vllm/bin/python"
-export PYTHONPATH="$PWD${PYTHONPATH:+:$PYTHONPATH}"
+export PYTHONPATH="$PWD/tools:$PWD/src${PYTHONPATH:+:$PYTHONPATH}"
 ```
 
 前后处理环境使用 `torch==2.8.0+cu126`、`transformers==4.57.3`、`qwen-tts==0.1.1`。
@@ -57,8 +73,8 @@ MODEL1="$(realpath ../UltraEval-Audio/init_model/emilia-v4-emilia2-cbinit-langid
 bash scripts/export_step100.sh
 MODEL2="$PWD/artifacts/step-00000100"
 
-$TTS_PYTHON -m lm_tts_vllm.prepare --model "$MODEL1" --output artifacts/backbone-56384
-$TTS_PYTHON -m lm_tts_vllm.prepare --model "$MODEL2" --output artifacts/backbone-100
+$TTS_PYTHON -m lm_tts_tools.prepare --model "$MODEL1" --output artifacts/backbone-56384
+$TTS_PYTHON -m lm_tts_tools.prepare --model "$MODEL2" --output artifacts/backbone-100
 ```
 
 `prepare` 提取 Talker 的 layers、norm、codec embedding，保留原权重 dtype；通过
@@ -68,7 +84,7 @@ $TTS_PYTHON -m lm_tts_vllm.prepare --model "$MODEL2" --output artifacts/backbone
 ## 推理与 BF16 对齐
 
 ```bash
-CUDA_VISIBLE_DEVICES=6 $TTS_PYTHON -m lm_tts_vllm.infer \
+CUDA_VISIBLE_DEVICES=6 $TTS_PYTHON -m lm_tts_tools.infer \
   --model "$MODEL1" --backbone artifacts/backbone-56384 \
   --vllm-python "$VLLM_PYTHON" --mode compare \
   --reference-audio ../UltraEval-Audio/raw_data/voice_clone_manifests/seed_tts_eval_zh/000000.wav \
@@ -115,7 +131,7 @@ step-56384 现有评测记录为 `speaker_icl`、`non_streaming=true`、`languag
 sampling、解码与 reference 裁剪，只在每次请求期间替换 Talker backbone：
 
 ```bash
-CUDA_VISIBLE_DEVICES=6 $TTS_PYTHON -m lm_tts_vllm.ultraeval \
+CUDA_VISIBLE_DEVICES=6 $TTS_PYTHON -m lm_tts_tools.ultraeval \
   --ultraeval-root ../UltraEval-Audio \
   --backbone artifacts/backbone-56384 --vllm-python "$VLLM_PYTHON" \
   --worker-log "$PWD/results/eval-56384-vllm.log" -- \
@@ -133,7 +149,7 @@ CUDA_VISIBLE_DEVICES=6 $TTS_PYTHON -m lm_tts_vllm.ultraeval \
 ## 测试
 
 ```bash
-PYTHONPATH=. $TTS_PYTHON -m unittest discover -s tests -v
+PYTHONPATH=src:tools $TTS_PYTHON -m unittest discover -s tests -v
 ```
 
 测试使用安装的 Qwen-TTS 实现作为 oracle，检查 BF16 RMSNorm/残差、MRoPE 和独立投影。
@@ -143,7 +159,7 @@ PYTHONPATH=. $TTS_PYTHON -m unittest discover -s tests -v
 若需区分前缀重算与增量 KV 解码带来的误差，可在原 PyTorch 环境重放同一 trace：
 
 ```bash
-CUDA_VISIBLE_DEVICES=6 $TTS_PYTHON -m lm_tts_vllm.replay \
+CUDA_VISIBLE_DEVICES=6 $TTS_PYTHON -m lm_tts_tools.replay \
   --reference-run results/56384-greedy --output results/pytorch-prefix-audit.json
 ```
 
@@ -159,7 +175,7 @@ CUDA_VISIBLE_DEVICES=6 $TTS_PYTHON -m lm_tts_vllm.replay \
 RMSNorm、Q/K/V 投影、Q/K norm、attention 输出、MLP 和逐层残差输出：
 
 ```bash
-CUDA_VISIBLE_DEVICES=6 $TTS_PYTHON -m lm_tts_vllm.layer_audit \
+CUDA_VISIBLE_DEVICES=6 $TTS_PYTHON -m lm_tts_tools.layer_audit \
   --model "$MODEL1" --backbone artifacts/backbone-56384 \
   --reference-run results/56384-greedy --vllm-python "$VLLM_PYTHON" \
   --output results/56384-layer-audit
@@ -168,3 +184,26 @@ CUDA_VISIBLE_DEVICES=6 $TTS_PYTHON -m lm_tts_vllm.layer_audit \
 第一层保存所有 token，之后保存最后一个 token；`report.json` 给出首个不同的
 操作和各处误差，两个 `*-layers.pt` 保留对照张量。诊断 hook 只在该工具发起
 的单次 prefill 期间安装，不进入正常推理路径，也不用于测量速度。
+
+## 原生 code predictor（当前只支持 greedy）
+
+`--code-predictor-engine vllm-eager` / `vllm-graph` 使用插件内的 code predictor，
+在 vLLM 环境执行；它调用 vLLM FlashAttention 2，使用 BF16 与帧内增量 KV cache，
+不调用 SDPA、不依赖 Transformers。`vllm-graph` 把全部 15 个残差码本步骤捕获为
+一个 CUDA graph。需同时指定 `--greedy` 或 `--code-predictor-greedy`，随机采样尚未实现，
+工具会明确拒绝不支持的组合，不会悄悄回退到 PyTorch。
+
+目前仍是单请求对齐路径：Talker 与 code predictor 通过工具层调用，额外 IPC 尚未消除，
+也未接入原生 serving 调度；CUDA graph 加速的范围仅是 code predictor。其独立检查：
+
+```bash
+CUDA_VISIBLE_DEVICES=6 $TTS_PYTHON -m lm_tts_tools.code_predictor_audit reference \
+  --model "$MODEL1" --reference-run results/56384-greedy --frames 0 1 2 7 \
+  --output results/cp-reference.pt
+CUDA_VISIBLE_DEVICES=6 $VLLM_PYTHON -m lm_tts_tools.code_predictor_audit native \
+  --input results/cp-reference.pt --output results/cp-native.json
+```
+
+工具验证原 PyTorch logits/码本、原生 eager 与 graph 的逐元素一致性，以及帧间缓存重用。
+`--require-identical-codes` 可额外要求原 PyTorch 全部码本一致，否则报告后返回失败。
+独立的耗时是 CP 微基准，不等于端到端加速倍数。

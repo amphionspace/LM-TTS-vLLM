@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import shutil
 import time
+from types import SimpleNamespace
 
 import numpy as np
 import soundfile as sf
@@ -28,6 +29,8 @@ class LengthCache(DynamicCache):
 def backbone_override(model, worker=None, trace=None):
     backbone = model.model.talker.model
     original = backbone.forward
+    predictor = model.model.talker.code_predictor
+    original_predict = predictor.generate
     chunks = []
 
     def forward(*args, **kwargs):
@@ -51,10 +54,19 @@ def backbone_override(model, worker=None, trace=None):
                                        hidden_states=(hidden,))
 
     backbone.forward = forward
+    if worker is not None and worker.info.get("code_predictor_engine", "pytorch") != "pytorch":
+        def predict(*args, **kwargs):
+            if args or kwargs.get("do_sample") is not False:
+                raise ValueError("The native code predictor currently requires greedy keyword-only generation")
+            if kwargs["max_new_tokens"] != model.model.config.talker_config.num_code_groups - 1:
+                raise ValueError("Code predictor must generate all residual codebooks")
+            return SimpleNamespace(sequences=worker.predict_codes(kwargs["inputs_embeds"]))
+        predictor.generate = predict
     try:
         yield
     finally:
         backbone.forward = original
+        predictor.generate = original_predict
 
 
 def tensor_error(reference, actual):
@@ -97,6 +109,7 @@ def main():
     parser.add_argument("--precision-profile", choices=["bf16", "native", "sdpa"], default="bf16")
     parser.add_argument("--engine-mode", choices=["reference", "cached"], default="reference")
     parser.add_argument("--attention-backend", choices=["FLASH_ATTN", "FLASHINFER", "TRITON_ATTN"], default="FLASH_ATTN")
+    parser.add_argument("--code-predictor-engine", choices=["pytorch", "vllm-eager", "vllm-graph"], default="pytorch")
     parser.add_argument("--reference-audio", required=True)
     parser.add_argument("--reference-text", required=True)
     parser.add_argument("--text", required=True)
@@ -115,6 +128,8 @@ def main():
     parser.add_argument("--max-logit-error", type=float,
                         help="Fail if teacher-forced maximum absolute logit error exceeds this value")
     args = parser.parse_args()
+    if args.code_predictor_engine != "pytorch" and not (args.greedy or args.code_predictor_greedy):
+        parser.error("Native code predictor currently requires --greedy or --code-predictor-greedy")
     if args.precision_profile == "sdpa" and args.engine_mode != "reference":
         parser.error("The SDPA diagnostic requires --engine-mode reference")
     if args.require_identical_codes and (args.mode != "compare" or not args.greedy):
@@ -171,6 +186,7 @@ def main():
         model.model.talker.generate = capture_generate
         start = time.monotonic()
         first_worker_step = len(worker.steps) if worker else 0
+        first_predictor_step = len(worker.predictor_steps) if worker else 0
         try:
             with backbone_override(model, worker, trace):
                 wavs, rate = model.generate_voice_clone(**settings)
@@ -196,6 +212,8 @@ def main():
             report["runs"][label]["talker_engine_seconds"] = sum(s["seconds"] for s in steps)
             report["runs"][label]["submitted_tokens"] = sum(s["submitted_tokens"] for s in steps)
             report["runs"][label]["cached_tokens"] = sum(s["cached_tokens"] or 0 for s in steps)
+            report["runs"][label]["code_predictor_seconds"] = sum(
+                s["seconds"] for s in worker.predictor_steps[first_predictor_step:])
         (out / "report.json").write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n")
 
     trace = []
@@ -221,7 +239,8 @@ def main():
             torch.save(trace, out / "trace.pt")
     if args.mode in {"vllm", "compare"}:
         with TalkerWorker(args.vllm_python, args.backbone, out / "vllm.log", args.precision_profile,
-                          engine_mode=args.engine_mode, attention_backend=args.attention_backend) as worker:
+                          engine_mode=args.engine_mode, attention_backend=args.attention_backend,
+                          code_predictor_engine=args.code_predictor_engine) as worker:
             report["worker"] = worker.info
             if trace:
                 report["teacher_forced"] = audit(model, worker, trace)

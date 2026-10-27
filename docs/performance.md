@@ -20,7 +20,9 @@ teacher-forced 与 free-running 之间清空 cache；质量与速度数据不能
 1. Talker、code predictor 的逐帧调用应在 GPU worker 内完成，使用请求独立的状态，
    消除当前 Python 进程间每帧往返。真正的 autoregressive decode 复用 KV cache，
    不能把每步全前缀重算包装成最终加速版本。
-2. code predictor 的 15 步 residual-codebook 解码需要固定 buffer、cache 和图捕获。
+2. code predictor 的 15 步 greedy 解码已实现帧内 cache 和 CUDA graph，并通过
+   两份模型共 13 个输入的 graph/eager 一致性与 cache 重用检查。随机采样、批量
+   请求和原生调度集成仍未完成。
    推理中的帧 embedding 求和必须保持 demo 的 `stack/sum` 语义，不能随意替换成
    逐 codebook 的 BF16 连加。采样和 codec 0 / EOS mask 也必须保持原协议。
 3. 逐项验证 CUDA graph、融合 norm/activation、continuous batching、异步输出。
