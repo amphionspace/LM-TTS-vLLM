@@ -42,3 +42,14 @@ def mlp_forward(self, x):
     return out
 
 
+def sdpa_attention(self, query, key, value):
+    """Single-request, full-prefix diagnostic oracle; no paging or chunking."""
+    q = query.view(1, -1, self.num_heads, self.head_size).transpose(1, 2)
+    k = key.view(1, -1, self.num_kv_heads, self.head_size).transpose(1, 2)
+    v = value.view(1, -1, self.num_kv_heads, self.head_size).transpose(1, 2)
+    out = F.scaled_dot_product_attention(
+        q, k, v, is_causal=q.shape[2] > 1, scale=self.impl.scale, enable_gqa=True
+    )
+    return out.transpose(1, 2).reshape_as(query)
+
+

@@ -89,9 +89,14 @@ CUDA_VISIBLE_DEVICES=6 $TTS_PYTHON -m lm_tts_vllm.infer \
   Talker repetition penalty=1.05）。相同随机种子不保证不同 logits 采到同一 token。
 - demo 的低温 preset：`--temperature 0.3 --top-k 10 --repetition-penalty 2.0 --code-predictor-greedy`。
 - `--precision-profile native`：对照 vLLM 原始融合算子。
+- `--precision-profile sdpa --engine-mode reference`：在相同 vLLM 权重和 BF16 算术下
+  使用 PyTorch SDPA，定位 attention 内核差异。它仅支持单请求完整前缀，是诊断模式，
+  不能用来宣称 paged attention 或 CUDA graph 性能。
 - `--engine-mode cached`：验证 KV cache 复用；teacher-forced 完成后先清空缓存，再测自由生成，
   避免参考 trace 预先填满缓存而美化速度结果。
 - `--reference-run results/已有基线`：重放已保存的相同请求，避免重复基线推理。
+- 回归门槛：`--require-identical-codes --greedy` 要求完整 codec 序列及长度一致；
+  `--max-logit-error <容差>` 检查 teacher-forced 最大绝对误差。超出门槛时保留报告并返回非零退出码。
 
 `report.json` 包含运行版本、逐步 hidden/logits 误差、有效 codec 范围内的原始 argmax
 一致率、top-2 margin、自由生成的 token 一致率和首个不同帧。

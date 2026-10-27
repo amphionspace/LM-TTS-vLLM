@@ -19,10 +19,12 @@ def main():
     parser.add_argument("--backbone", required=True)
     parser.add_argument("--vllm-python", required=True)
     parser.add_argument("--worker-log", type=Path, required=True)
-    parser.add_argument("--precision-profile", choices=["bf16", "native"], default="bf16")
+    parser.add_argument("--precision-profile", choices=["bf16", "native", "sdpa"], default="bf16")
     parser.add_argument("--engine-mode", choices=["reference", "cached"], default="reference")
     parser.add_argument("evaluation_args", nargs=argparse.REMAINDER)
     args = parser.parse_args()
+    if args.precision_profile == "sdpa" and args.engine_mode != "reference":
+        parser.error("The SDPA diagnostic requires --engine-mode reference")
     forwarded = args.evaluation_args
     if forwarded[:1] == ["--"]:
         forwarded = forwarded[1:]

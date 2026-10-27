@@ -13,7 +13,7 @@ from vllm.model_executor.layers.pooler import DispatchPooler
 from vllm.model_executor.models.qwen3 import Qwen3Model
 
 
-from .precision import BFloatRope, mlp_forward, rms_forward, split_linear
+from .precision import BFloatRope, mlp_forward, rms_forward, sdpa_attention, split_linear
 
 
 class LMTTSTalkerModel(nn.Module):
@@ -28,9 +28,9 @@ class LMTTSTalkerModel(nn.Module):
         self.model = Qwen3Model(vllm_config=vllm_config, prefix=f"{prefix}.model".strip("."))
         self.pooler = DispatchPooler.for_embedding(vllm_config.model_config.pooler_config)
         self.profile = os.environ.get("LM_TTS_PRECISION", "bf16")
-        if self.profile not in {"bf16", "native"}:
-            raise ValueError("LM_TTS_PRECISION must be bf16 or native")
-        if self.profile == "bf16":
+        if self.profile not in {"bf16", "native", "sdpa"}:
+            raise ValueError("LM_TTS_PRECISION must be bf16, native or sdpa")
+        if self.profile in {"bf16", "sdpa"}:
             cfg = vllm_config.model_config.hf_config
             for module in self.model.modules():
                 if hasattr(module, "variance_epsilon") and hasattr(module, "weight"):
@@ -43,6 +43,10 @@ class LMTTSTalkerModel(nn.Module):
                 layer.mlp.gate_up_proj.parity_sizes = [cfg.intermediate_size] * 2
                 layer.mlp.gate_up_proj.forward = types.MethodType(split_linear, layer.mlp.gate_up_proj)
                 layer.mlp.forward = types.MethodType(mlp_forward, layer.mlp)
+                if self.profile == "sdpa":
+                    if vllm_config.cache_config.enable_prefix_caching:
+                        raise ValueError("The SDPA diagnostic requires full-prefix reference mode")
+                    attn.attn.forward = types.MethodType(sdpa_attention, attn.attn)
 
     def embed_input_ids(self, input_ids):
         return self.model.embed_input_ids(input_ids)

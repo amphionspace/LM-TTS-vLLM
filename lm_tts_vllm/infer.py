@@ -94,7 +94,7 @@ def main():
     parser.add_argument("--backbone")
     parser.add_argument("--vllm-python")
     parser.add_argument("--mode", choices=["pytorch", "vllm", "compare"], default="compare")
-    parser.add_argument("--precision-profile", choices=["bf16", "native"], default="bf16")
+    parser.add_argument("--precision-profile", choices=["bf16", "native", "sdpa"], default="bf16")
     parser.add_argument("--engine-mode", choices=["reference", "cached"], default="reference")
     parser.add_argument("--reference-audio", required=True)
     parser.add_argument("--reference-text", required=True)
@@ -109,7 +109,17 @@ def main():
     parser.add_argument("--repetition-penalty", type=float, default=1.05)
     parser.add_argument("--code-predictor-greedy", action="store_true")
     parser.add_argument("--reference-run", help="Reuse an identical request's saved PyTorch trace and audio")
+    parser.add_argument("--require-identical-codes", action="store_true",
+                        help="Fail the comparison unless all greedy codec frames and lengths match")
+    parser.add_argument("--max-logit-error", type=float,
+                        help="Fail if teacher-forced maximum absolute logit error exceeds this value")
     args = parser.parse_args()
+    if args.precision_profile == "sdpa" and args.engine_mode != "reference":
+        parser.error("The SDPA diagnostic requires --engine-mode reference")
+    if args.require_identical_codes and (args.mode != "compare" or not args.greedy):
+        parser.error("--require-identical-codes requires --mode compare --greedy")
+    if args.max_logit_error is not None and (args.mode != "compare" or not 0 <= args.max_logit_error < float("inf")):
+        parser.error("--max-logit-error requires compare mode and a finite nonnegative tolerance")
     if args.mode != "pytorch" and not (args.backbone and args.vllm_python):
         parser.error("vLLM requires --backbone and --vllm-python")
     if args.mode != "pytorch":
@@ -228,6 +238,10 @@ def main():
                                   "identical_waveform": np.array_equal(waves["pytorch"], waves["vllm"])}
     (out / "report.json").write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n")
     print(json.dumps({key: value for key, value in report.items() if key != "teacher_forced"}, indent=2, ensure_ascii=False))
+    if args.require_identical_codes and not report["free_running"]["identical_codes"]:
+        raise SystemExit("Greedy codec parity failed; inspect report.json")
+    if args.max_logit_error is not None and report["teacher_forced"]["max_logit_abs_error"] > args.max_logit_error:
+        raise SystemExit("Logit tolerance exceeded; inspect report.json")
 
 
 if __name__ == "__main__":

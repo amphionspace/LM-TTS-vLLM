@@ -1,6 +1,7 @@
 """Private local-pipe worker; runs in the isolated vLLM environment."""
 import argparse
 from multiprocessing.connection import Connection
+import os
 import traceback
 import time
 
@@ -35,7 +36,8 @@ def main():
                   gpu_memory_utilization=0.04,
                   attention_config={"backend": "FLASH_ATTN"})
         connection.send({"ready": True, "vllm": vllm.__version__, "torch": torch.__version__,
-                         "gpu": torch.cuda.get_device_name(), "engine_mode": args.engine_mode})
+                         "gpu": torch.cuda.get_device_name(), "engine_mode": args.engine_mode,
+                         "attention": "pytorch_sdpa" if os.environ.get("LM_TTS_PRECISION") == "sdpa" else "vllm_flash_attn"})
         while True:
             value = connection.recv()
             if value is None:
