@@ -77,9 +77,16 @@ def main():
                     raise ValueError("Native code predictor was not enabled")
                 inputs = torch.from_numpy(value["predict_codes"]).to(device="cuda", dtype=torch.bfloat16)
                 started = time.perf_counter()
-                codes, _ = predictor.run(inputs, use_graph=args.code_predictor_engine == "vllm-graph")
+                if "forced_codes" in value:
+                    forced = torch.from_numpy(value["forced_codes"]).to(device="cuda", dtype=torch.long)
+                    codes, logits = predictor.eager(inputs, forced_codes=forced)
+                else:
+                    codes, logits = predictor.run(inputs, use_graph=args.code_predictor_engine == "vllm-graph")
                 codes = codes.cpu().numpy()
-                connection.send({"codes": codes, "seconds": time.perf_counter() - started})
+                result = {"codes": codes, "seconds": time.perf_counter() - started}
+                if value.get("return_logits"):
+                    result["logits"] = logits.cpu().numpy()
+                connection.send(result)
                 continue
             layer_trace = isinstance(value, dict) and "trace_embeds" in value
             if layer_trace:

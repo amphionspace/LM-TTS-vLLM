@@ -1,5 +1,28 @@
 # BF16 验证记录（2026-10-27）
 
+## Talker / code predictor 交叉替换
+
+`lm_tts_tools.pipeline_audit` 固定原始 Talker 前缀、首码本以及 residual
+teacher-forced 前缀，分别替换 Talker hidden、CP 或同时替换两者。
+自由 residual 生成与同前缀 logits 分开记录；不使用质量评分。
+
+| checkpoint / 帧（从 0 起） | 只换 CP | 只换 Talker | 同时替换 |
+| --- | --- | --- | --- |
+| 56384 / 0 | 全码本相同 | codebook 5 首次不同 | 全码本相同 |
+| 56384 / 1 | codebook 6 首次不同 | 全码本相同 | codebook 6 首次不同 |
+| 100 / 0 | 全码本相同 | 全码本相同 | 全码本相同 |
+| 100 / 1 | 全码本相同 | 全码本相同 | codebook 13 首次不同 |
+
+56384 第 0 帧的相关候选在原实现中同为 8.0625；只换 Talker 后变为
+8.0 / 8.0625。第 1 帧只换 CP 时，原来的 8.0625 / 8.0 变为
+8.0625 / 8.0625。100 第 1 帧同时替换时，原来仅相差 0.00390625
+的候选顺序翻转。这些案例显示两个模块的误差既可能抵消也可能叠加，
+不能由单模块通过推断整条链路一致，或因偶然抵消而宣称精度提高。
+
+产物：`results/56384-pipeline-ablation`、`results/100-pipeline-ablation`，
+包含各分支自由生成的 codec、固定前缀 logits 和候选 margin。
+严格 codec 一致性门槛保持不变。
+
 当前结论：两个 checkpoint 都已通过插件生成音频；数值误差已量化，但完整 codec
 一致性尚未通过，当前不能作为精度和速度均验收完成的 serving 插件。
 
