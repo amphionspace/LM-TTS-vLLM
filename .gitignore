@@ -7,3 +7,4 @@ results/
 vendor-reference/
 build/
 dist/
+:memory:.ses

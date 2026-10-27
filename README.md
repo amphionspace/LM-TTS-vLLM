@@ -4,7 +4,7 @@
 `tts-demo/app.py` 和 `UltraEval-Audio/scripts/voice_clone_infer.py` 的
 **BF16 + PyTorch SDPA** 推理为数值基准。
 
-本实现将 Talker backbone 放入 vLLM；文本投影、speaker encoder、16-codebook
+数值对齐工具将 Talker backbone 放入 vLLM；文本投影、speaker encoder、16-codebook
 帧的组合、Talker 采样和 waveform 解码沿用原来的 `qwen-tts`。
 code predictor 默认沿用原实现作为对照，也可选择下面的原生 FlashAttention / CUDA graph 路径。
 通过进程隔离保留原 demo 的 Transformers 4.57.3，同时使用 vLLM 所需的
@@ -19,15 +19,14 @@ Transformers 5.x。插件通过 `vllm.general_plugins` 注册 `LMTTSTalkerModel`
   `tools/pyproject.toml` 可以单独安装；运行插件不要求安装它。
 - `tests/`、`docs/`、`scripts/`：验证、记录与开发辅助，不属于插件的运行依赖。
 
-最终启动约定是安装插件后由 vLLM 自动加载 `vllm.general_plugins` entry point，
-用户不需要另行启动本仓库的 client 或 worker。当前已注册的 `LMTTSTalkerModel`
-仍是用于对齐的 Talker pooling 模型，**尚不是可用 `vllm serve` 完整生成音频的 TTS 接口**。
-后者还需要把完整生成状态与音频输出协议接入原生运行链路，不能把转换后的 backbone
-加载成功当成端到端 TTS 服务已完成。
+最终启动约定是安装插件后由运行时加载 entry point，用户不需要另行启动本仓库
+的 client 或 worker。`vllm.general_plugins` 注册用于对齐的 `LMTTSTalkerModel`；
+可选 `vllm_omni.general_plugins` 注册完整的原生 TTS 两阶段 pipeline。
 
-正在接入可选的原生 vLLM-Omni 两阶段 pipeline，详见
-[原生接入状态与边界](docs/native-pipeline.md)。它与下面已验证的隔离对齐工具分开，
-目前尚未完成端到端验收。
+原生 pipeline 已通过标准 Omni API 生成音频和 codec，使用上游调度、KV cache
+和音频输出协议，不使用开发工具的进程桥接。**完整 codec 一致性、自动 CLI 启动
+及性能配置尚未验收**，详见 [原生接入状态与边界](docs/native-pipeline.md)。
+下面的隔离工具仍用于保留原 Torch / Transformers 环境的数值基线。
 
 ## 当前边界
 
