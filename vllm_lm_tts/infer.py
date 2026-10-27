@@ -111,6 +111,10 @@ def main():
     args = parser.parse_args()
     if args.mode != "pytorch" and not (args.backbone and args.vllm_python):
         parser.error("vLLM requires --backbone and --vllm-python")
+    if args.mode != "pytorch":
+        source = json.loads((Path(args.backbone) / "source.json").read_text())
+        if Path(source["model"]).resolve() != Path(args.model).resolve():
+            parser.error("--backbone does not belong to --model; prepare the matching checkpoint")
     out = Path(args.output)
     out.mkdir(parents=True, exist_ok=False)
     from qwen_tts import Qwen3TTSModel
