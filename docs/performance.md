@@ -40,12 +40,12 @@ teacher-forced 与 free-running 之间清空 cache；质量与速度数据不能
   codec argmax、top-2 margin。区别原始 logits 与施加 repetition penalty 后的决策。
 - greedy：全 codebook、首个分歧帧、EOS、生成长度；随机采样：检查 logits 分布和
   多样本质量，不把相同 seed 等同于跨内核 bitwise 保证。
-- 使用 UltraEval 的原 CER/WER 和说话人相似度评分；覆盖中英文、Auto/显式语言、
-  长短句和参考音频。单句通过不足以说明完整质量无回退。
+- 当前不运行 CER/WER 或说话人相似度评分；UltraEval 仅用于核对实际推理协议与输入。
+  对齐验证覆盖中英文、Auto/显式语言、长短句和参考音频，直接比较数值和 codec 输出。
 - 速度：预热后的端到端 RTF、真实首个音频块延迟、p50/p95、音频秒/墙钟秒，
   并发 1/4/8、显存峰值。当前 `first_codec_frame_seconds` 只是 codec 首帧，不能标成 TTFA。
 - 同卡、相同请求集、相同输出长度条件下比较；记录 warmup、缓存冷热和 GPU 竞争。
   验证期间共享 A800 的其他任务会动态改变显存和负载，因此单次 wall time 只作冒烟数据，
   不能据此发布加速倍数。
 
-只有精度/质量回归与性能数据同时满足目标，才把对应优化设为默认。
+只有数值/codec 一致性回归与性能数据同时满足目标，才把对应优化设为默认。

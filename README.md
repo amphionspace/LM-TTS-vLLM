@@ -135,7 +135,17 @@ PYTHONPATH=. $TTS_PYTHON -m unittest discover -s tests -v
 ```
 
 测试使用安装的 Qwen-TTS 实现作为 oracle，检查 BF16 RMSNorm/残差、MRoPE 和独立投影。
-端到端 GPU 结果见本地 `results/*/report.json`。权重、环境、trace 和音频不提交到 Git。
+端到端 GPU 结果见本地 `results/*/report.json`，测量摘要见 [验证记录](docs/validation.md)。
+权重、环境、trace 和音频不提交到 Git。
+
+若需区分前缀重算与增量 KV 解码带来的误差，可在原 PyTorch 环境重放同一 trace：
+
+```bash
+CUDA_VISIBLE_DEVICES=6 $TTS_PYTHON -m lm_tts_vllm.replay \
+  --reference-run results/56384-greedy --output results/pytorch-prefix-audit.json
+```
+
+此对照不使用 vLLM，也不运行 ASR 或说话人评分。
 
 接口参考：[vLLM 0.32.0 release](https://github.com/vllm-project/vllm/releases/tag/v0.32.0)、
 [plugin system](https://docs.vllm.ai/en/latest/design/plugin_system/)。
