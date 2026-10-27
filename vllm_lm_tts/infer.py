@@ -146,12 +146,20 @@ def main():
             if output.hidden_states[-1] is not None:
                 collected.append(output.hidden_states[-1].detach().cpu())
         hook = model.model.talker.register_forward_hook(collect)
+        original_generate = model.model.talker.generate
+        finish = {}
+        def capture_generate(*positional, **kwargs):
+            result = original_generate(*positional, **kwargs)
+            finish["last_token"] = result.sequences[0, -1].item()
+            return result
+        model.model.talker.generate = capture_generate
         start = time.monotonic()
         try:
             with backbone_override(model, worker, trace):
                 wavs, rate = model.generate_voice_clone(**settings)
         finally:
             hook.remove()
+            model.model.talker.generate = original_generate
         wav = np.asarray(wavs[0], dtype=np.float32)
         if not len(wav) or not np.isfinite(wav).all():
             raise RuntimeError("Generated waveform is empty or non-finite")
@@ -162,7 +170,8 @@ def main():
         report["runs"][label] = {"seconds": time.monotonic() - start,
                                   "audio_seconds": len(wav) / rate, "sample_rate": rate,
                                   "codec_frames": len(frame_codes),
-                                  "reached_token_limit": len(frame_codes) >= args.max_new_tokens - 1}
+                                  "ended_with_eos": finish["last_token"] == model.model.config.talker_config.codec_eos_token_id,
+                                  "reached_token_limit": finish["last_token"] != model.model.config.talker_config.codec_eos_token_id}
         (out / "report.json").write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n")
 
     trace = []
