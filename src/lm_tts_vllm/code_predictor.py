@@ -1,7 +1,8 @@
 """Single-frame BF16 code predictor using vLLM FlashAttention and local KV cache.
 
-Inference-only, single request, greedy decoding. All fifteen residual codebooks
-can be captured in one CUDA graph. No SDPA or Transformers runtime is used.
+Inference-only, single request, greedy or sampled decoding. Greedy residual
+codebooks can be captured in one CUDA graph; sampling currently uses eager FA2.
+No SDPA or Transformers runtime is used.
 """
 import json
 from pathlib import Path
@@ -98,15 +99,30 @@ class CodePredictor:
             x = residual + self.linear(activated, p + "mlp.down_proj")
         return self.norm(x, "model.norm")[-1:]
 
+    @staticmethod
+    def sample(scores, temperature=0.9, top_k=50, top_p=1.0, generator=None):
+        if temperature <= 0 or not 0 < top_p <= 1 or top_k < 0:
+            raise ValueError("Invalid code predictor sampling parameters")
+        scores = scores / temperature
+        if top_k:
+            threshold = scores.topk(min(top_k, scores.shape[-1]), dim=-1).values[..., -1:]
+            scores = scores.masked_fill(scores < threshold, -float("inf"))
+        if top_p < 1:
+            sorted_scores, indices = scores.sort(dim=-1)
+            remove = sorted_scores.softmax(-1).cumsum(-1) <= (1 - top_p)
+            remove[..., -1] = False
+            scores = scores.masked_fill(torch.zeros_like(remove).scatter(-1, indices, remove), -float("inf"))
+        return torch.multinomial(scores.softmax(-1), 1, generator=generator).squeeze(-1)
+
     @torch.inference_mode()
-    def eager(self, inputs, forced_codes=None):
+    def eager(self, inputs, forced_codes=None, sampling=None):
         """Forced prefixes are only for teacher-forced numeric diagnostics."""
         x = inputs.reshape(2, self.config["hidden_size"])
         codes, logits = [], []
         for step in range(self.groups - 1):
             hidden = self.step(x, 0 if step == 0 else step + 1)
             scores = self.linear(hidden, f"lm_head.{step}").float()
-            token = scores.argmax(-1)
+            token = scores.argmax(-1) if sampling is None else self.sample(scores, **sampling)
             codes.append(token)
             logits.append(scores)
             if step < self.groups - 2:
