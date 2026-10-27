@@ -13,8 +13,13 @@ Talker 使用 vLLM FlashAttention，残差码本使用本插件的 FA2 / CUDA gr
 目前仅支持 BF16、TP/PP=1、batch=1、greedy、显式 non_streaming_mode=True。
 部署配置关闭 Talker graph、prefix cache 和 async scheduling，属于验证配置。
 
-状态：插件导入与注册已通过；端到端推理正在验证，不能视为已完成的 serving 接口。
-原基线环境 7 项数值单测通过；可选 Omni 环境的配置 roundtrip / 阶段覆盖
+状态：step-56384 已通过标准 Omni API 生成音频及 codec，但数值一致性未通过，
+不能视为已完成的 serving 接口。`results/native-omni-56384-v5` 输出 24 kHz /
+6.32 秒、79×16 codec；首次请求 14.41 秒（含未预热的前后处理），不作为性能结论。
+对照发现首码本序列错位：上游 full-payload processor 在达到长度上限时用
+`audio[-(len(output_token_ids)-1):]` 裁剪，丢失第一帧。插件新增 stage processor
+保留前缀，仍由上游负责参考 codec 拼接和传输；修正后的完整运行待验证。
+原基线环境 9 项单测通过（可选 Omni 测试跳过）；Omni 环境的配置 roundtrip / 阶段覆盖
 回归测试通过。主 wheel 已确认包含运行代码及 YAML，不包含 `lm_tts_tools`。
 当前上游 SDK 在加载 general plugins 前解析 pipeline，直接构造 `Omni` 会因
 未注册的 `lm_tts` model type 失败。冒烟工具先调用官方
