@@ -8,6 +8,9 @@ version = "0.1.0"
 description = "Development, inference comparison and UltraEval tools for LM-TTS-vLLM"
 requires-python = ">=3.11"
 
+[project.optional-dependencies]
+demo = ["gradio>=6.17,<7", "fastapi", "uvicorn", "soundfile"]
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["lm_tts_tools*"]

@@ -10,7 +10,9 @@ vLLM 0.32 / Torch 2.13 / Transformers 5.16.1–5.19；浅克隆安装生成的
 与原生两阶段 pipeline。模型在标准 Omni worker 内运行；请求调度、KV cache
 与音频输出由 Omni 管理，不使用本仓库开发工具的 client/worker。
 Talker 使用 vLLM FlashAttention，残差码本使用本插件的 FA2 / CUDA graph。
-目前仅支持 BF16、TP/PP=1、batch=1、greedy、显式 non_streaming_mode=True。
+目前支持 BF16、TP/PP=1、batch=1、显式 non_streaming_mode=True。
+CP 支持 greedy 和 temperature / top-k / top-p sampling；greedy 使用 CUDA graph，
+sampling 暂用 eager FA2，并通过上游请求级 generator 隔离随机种子。
 部署配置关闭 Talker graph、prefix cache 和 async scheduling，属于验证配置。
 
 状态：两个 checkpoint 都已通过标准 Omni API 生成音频及 codec，但完整

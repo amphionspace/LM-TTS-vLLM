@@ -30,6 +30,9 @@ Transformers 5.x。插件通过 `vllm.general_plugins` 注册 `LMTTSTalkerModel`
 
 ## 当前边界
 
+双模式 Gradio 试听页面及启动说明见 [demo.md](docs/demo.md)，界面可选择原
+PyTorch 推理或原生 vLLM 插件，并支持 Talker / CP 采样。
+
 - 支持两份指定模型的 **non-streaming / speaker+ICL / batch size 1** 推理。
 - step-100 的训练是 mixed interleaved 5×10，但也支持 non-streaming；本入口明确
   使用与 demo 相同的 non-streaming 协议，**不将它当成 interleaved streaming 评测**。
@@ -188,12 +191,13 @@ CUDA_VISIBLE_DEVICES=6 $TTS_PYTHON -m lm_tts_tools.layer_audit \
 操作和各处误差，两个 `*-layers.pt` 保留对照张量。诊断 hook 只在该工具发起
 的单次 prefill 期间安装，不进入正常推理路径，也不用于测量速度。
 
-## 原生 code predictor（当前只支持 greedy）
+## 隔离对齐工具的原生 code predictor
 
 `--code-predictor-engine vllm-eager` / `vllm-graph` 使用插件内的 code predictor，
 在 vLLM 环境执行；它调用 vLLM FlashAttention 2，使用 BF16 与帧内增量 KV cache，
 不调用 SDPA、不依赖 Transformers。`vllm-graph` 把全部 15 个残差码本步骤捕获为
-一个 CUDA graph。需同时指定 `--greedy` 或 `--code-predictor-greedy`，随机采样尚未实现，
+一个 CUDA graph。此隔离工具需指定 `--greedy` 或 `--code-predictor-greedy`；
+原生 Omni / Gradio 路径另外支持随机采样，
 工具会明确拒绝不支持的组合，不会悄悄回退到 PyTorch。
 
 目前仍是单请求对齐路径：Talker 与 code predictor 通过工具层调用，额外 IPC 尚未消除，
