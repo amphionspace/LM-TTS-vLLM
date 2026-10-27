@@ -8,6 +8,9 @@
   Omni 环境。CP greedy 保留 CUDA graph，CP sampling 暂用 eager FA2。
 - 支持 56384 / step-100、上传参考音频、语言、两个原 demo 预设、greedy 对齐预设，
   以及 Talker / CP 独立 temperature、top-k、top-p、重复惩罚和种子。
+- 开发分支新增仅 speaker embedding 克隆（参考文本可空），以及
+  `non_streaming_mode` 文本条件切换。关闭该选项不代表音频分块返回。
+  已构建并检查新版 UI schema；在线服务仍使用主分支版本。
 - 默认每次最多 512 帧，可调至 1024；参考音频最长 30 秒。两个后端各驻留一个模型，
   切换 checkpoint 会重新加载，vLLM 首次加载可能需要数分钟。
 - 两种引擎的 RNG 算法及运算不同，相同 seed 不保证跨引擎生成相同 codec。

@@ -31,3 +31,24 @@
 组合，各返回 7 × 16 个有效 codec 和 0.56 秒音频（max_tokens=8）。
 结果见 `results/base-compat/report.json`。单元测试 13 项，12 通过、1 项因
 基线环境不包含可选原生运行时而跳过。
+
+复现入口（运行于原生 Omni 环境，设置 `PYTHONPATH=src:tools`）：
+
+```bash
+python -m lm_tts_tools.compat_smoke --model artifacts/native-56384 \
+  --ref-audio /path/to/reference.wav --output results/base-compat
+python -m lm_tts_tools.compat_smoke --model artifacts/native-100 \
+  --ref-audio /path/to/reference.wav --output results/audio-formats --audio-formats
+python -m lm_tts_tools.streaming_smoke --model artifacts/native-56384 \
+  --ref-audio /path/to/reference.wav --output results/streaming
+```
+
+这些固定用例的参考文本是“在此奉劝大家别乱打美白针。”，应使用对应音频。
+音频格式测试覆盖路径、file URI、data URI/base64 和 `(waveform, sr)`。
+流式测试显式使用 `deploy_config` 和 `RequestOutputKind.DELTA`，并断言实际
+收到多个中间音频块；只收到完整音频会判失败。
+
+`--cached-prompt` 使用标准 `apply_model` RPC 导出 JSON 可序列化的提示，
+再移除请求中的参考音频，验证完全复用提示的生成路径。该上游 RPC 的 callable
+需要 `VLLM_ALLOW_INSECURE_SERIALIZATION=1`；只在可信本地离线测试进程中设置，
+不写入插件默认配置或在线服务。普通生成和直接传入缓存提示不需要这个开关。

@@ -12,6 +12,7 @@ async def run(args):
     import numpy as np
     import soundfile as sf
     import torch
+    from vllm.sampling_params import RequestOutputKind
     from transformers import AutoTokenizer
     from vllm_omni import AsyncOmni
     from vllm_omni.plugins import load_omni_general_plugins
@@ -36,11 +37,14 @@ async def run(args):
         info, task_type='Base', tokenize_prompt=lambda t: tok(t)['input_ids'],
         codec_language_id=config['codec_language_id'], spk_is_dialect=config.get('spk_is_dialect'))
     args.output.mkdir(parents=True, exist_ok=False)
-    engine = AsyncOmni(model=str(model), deploy_config_path=str(
+    engine = AsyncOmni(model=str(model), deploy_config=str(
         Path(lm_tts_vllm.__file__).parent / 'native_streaming.yaml'),
         stage_overrides={'0': {'kv_cache_memory_bytes': 536870912}})
     try:
+        assert engine.async_chunk, 'Streaming deploy config was not applied'
         params = copy.deepcopy(engine.default_sampling_params_list)
+        for param in params:
+            param.output_kind = RequestOutputKind.DELTA
         params[0].max_tokens = 80
         params[0].min_tokens = 80  # Force the capped-generation boundary.
         params[0].seed = 42

@@ -4,6 +4,7 @@ import base64
 import copy
 import json
 import math
+import os
 from operator import methodcaller
 from pathlib import Path
 
@@ -18,6 +19,9 @@ def main():
     parser.add_argument('--audio-formats', action='store_true',
                         help='Exercise path, file URI, base64, and waveform inputs across the four cases')
     args = parser.parse_args()
+    if args.cached_prompt and os.environ.get('VLLM_ALLOW_INSECURE_SERIALIZATION') != '1':
+        parser.error('The offline apply_model test requires VLLM_ALLOW_INSECURE_SERIALIZATION=1 '
+                     'for its trusted local callable; do not enable this in a public service.')
     import numpy as np
     import soundfile as sf
     import torch
@@ -50,6 +54,7 @@ def main():
             cases.append({'x_vector_only': xvec, 'non_streaming_mode': nonstream, 'prompt_length': length,
                           'cp_sampling': not nonstream})
     if args.audio_formats:
+        from .native_inputs import reference_audio_payload
         if args.cached_prompt:
             parser.error('--audio-formats and --cached-prompt exercise different input paths')
         wav, sr = sf.read(args.ref_audio, dtype='float32')
@@ -57,7 +62,7 @@ def main():
                   'data:audio/wav;base64,' + base64.b64encode(args.ref_audio.read_bytes()).decode(),
                   (wav, sr)]
         for request, case, audio, label in zip(requests, cases, inputs, ['path', 'file_uri', 'base64', 'waveform']):
-            request['additional_information']['ref_audio'] = [audio]
+            request['additional_information']['ref_audio'] = [reference_audio_payload(audio)]
             case['audio_format'] = label
     args.output.mkdir(parents=True, exist_ok=False)
     engine = Omni(model=str(model), stage_overrides={
@@ -72,7 +77,7 @@ def main():
                 while isinstance(result, list) and len(result) == 1:
                     result = result[0]
                 if not isinstance(result, dict) or 'ref_spk_embedding' not in result:
-                    raise RuntimeError(f'Unexpected voice prompt RPC result: {type(result)}')
+                    raise RuntimeError(f'Unexpected voice prompt RPC result: {result!r}')
                 (args.output / f'voice-prompt-{xvec}.json').write_text(json.dumps(result))
                 for request, case in zip(requests, cases):
                     if case['x_vector_only'] == xvec:
