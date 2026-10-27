@@ -10,9 +10,16 @@ requires-python = ">=3.11"
 
 [project.optional-dependencies]
 engine = ["vllm==0.32.0"]
+omni = ["vllm==0.32.0", "vllm-omni @ git+https://github.com/vllm-project/vllm-omni.git@ee37ec0620a99b3787dab5e5e3bd1f5cdfd0615f"]
 
 [project.entry-points."vllm.general_plugins"]
 lm_tts = "lm_tts_vllm:register"
+
+[project.entry-points."vllm_omni.general_plugins"]
+lm_tts = "lm_tts_vllm.omni:register"
+
+[tool.setuptools.package-data]
+lm_tts_vllm = ["*.yaml"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

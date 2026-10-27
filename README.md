@@ -25,6 +25,10 @@ Transformers 5.x。插件通过 `vllm.general_plugins` 注册 `LMTTSTalkerModel`
 后者还需要把完整生成状态与音频输出协议接入原生运行链路，不能把转换后的 backbone
 加载成功当成端到端 TTS 服务已完成。
 
+正在接入可选的原生 vLLM-Omni 两阶段 pipeline，详见
+[原生接入状态与边界](docs/native-pipeline.md)。它与下面已验证的隔离对齐工具分开，
+目前尚未完成端到端验收。
+
 ## 当前边界
 
 - 支持两份指定模型的 **non-streaming / speaker+ICL / batch size 1** 推理。

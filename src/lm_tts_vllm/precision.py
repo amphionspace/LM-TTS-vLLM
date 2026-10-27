@@ -1,4 +1,6 @@
 """Explicit BF16 operations matching the Qwen-TTS PyTorch implementation."""
+import types
+
 import torch
 from torch import nn
 from torch.nn import functional as F
@@ -40,3 +42,21 @@ def mlp_forward(self, x):
     gate, up = gate_up.chunk(2, -1)
     out, _ = self.down_proj(F.silu(gate) * up)
     return out
+
+
+def apply_bf16(backbone, config):
+    """Preserve reference rounding boundaries while retaining native attention."""
+    for module in backbone.modules():
+        if hasattr(module, "variance_epsilon") and hasattr(module, "weight"):
+            module.forward = types.MethodType(rms_forward, module)
+    theta = getattr(config, "rope_theta", None)
+    if theta is None:
+        theta = config.rope_parameters["rope_theta"]
+    for layer in backbone.layers:
+        attn = layer.self_attn
+        attn.rotary_emb = BFloatRope(config.head_dim, theta)
+        attn.qkv_proj.parity_sizes = [attn.q_size, attn.kv_size, attn.kv_size]
+        attn.qkv_proj.forward = types.MethodType(split_linear, attn.qkv_proj)
+        layer.mlp.gate_up_proj.parity_sizes = [config.intermediate_size] * 2
+        layer.mlp.gate_up_proj.forward = types.MethodType(split_linear, layer.mlp.gate_up_proj)
+        layer.mlp.forward = types.MethodType(mlp_forward, layer.mlp)

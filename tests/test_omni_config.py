@@ -1,0 +1,29 @@
+"""Run in the optional Omni environment; no weights or GPU required."""
+import importlib.util
+import unittest
+
+
+@unittest.skipUnless(importlib.util.find_spec("vllm_omni"), "optional Omni runtime not installed")
+class OmniConfigTests(unittest.TestCase):
+    def test_nested_config_survives_transformers_roundtrip_and_stage_override(self):
+        from lm_tts_vllm.omni import LMTTSConfig
+        raw = {"model_type": "lm_tts", "talker_config": {
+            "hidden_size": 1024, "num_attention_heads": 16, "num_hidden_layers": 28,
+            "codec_eos_token_id": 2150,
+            "rope_scaling": {"rope_type": "default", "mrope_section": [24, 20, 20],
+                             "interleaved": True}, "rope_theta": 1000000}}
+        config = LMTTSConfig.from_dict(raw)
+        self.assertEqual(config.get_text_config().num_attention_heads, 16)
+        self.assertEqual(config.talker_config.codec_eos_token_id, 2150)
+        self.assertNotIn("mrope_section", config.talker_config.rope_parameters)
+        copy = LMTTSConfig.from_dict(config.to_dict())
+        copy.update({"architectures": ["Qwen3TTSCode2Wav"],
+                     "talker_config": {"max_position_embeddings": 8192}})
+        self.assertEqual(copy.talker_config.hidden_size, 1024)
+        self.assertEqual(copy.talker_config.num_hidden_layers, 28)
+        self.assertEqual(copy.talker_config.max_position_embeddings, 8192)
+        self.assertEqual(copy.get_text_config().num_attention_heads, 16)
+
+
+if __name__ == "__main__":
+    unittest.main()

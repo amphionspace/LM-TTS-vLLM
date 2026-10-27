@@ -4,16 +4,13 @@ The BF16 profile preserves Qwen-TTS's intermediate rounding boundaries. Attentio
 still uses vLLM's backend; parity is measured, never assumed to be bitwise exact.
 """
 import os
-import types
 
-import torch
 from torch import nn
 
 from vllm.model_executor.layers.pooler import DispatchPooler
 from vllm.model_executor.models.qwen3 import Qwen3Model
 
-
-from .precision import BFloatRope, mlp_forward, rms_forward, split_linear
+from .precision import apply_bf16
 
 
 class LMTTSTalkerModel(nn.Module):
@@ -31,18 +28,7 @@ class LMTTSTalkerModel(nn.Module):
         if self.profile not in {"bf16", "native"}:
             raise ValueError("LM_TTS_PRECISION must be bf16 or native")
         if self.profile == "bf16":
-            cfg = vllm_config.model_config.hf_config
-            for module in self.model.modules():
-                if hasattr(module, "variance_epsilon") and hasattr(module, "weight"):
-                    module.forward = types.MethodType(rms_forward, module)
-            for layer in self.model.layers:
-                attn = layer.self_attn
-                attn.rotary_emb = BFloatRope(cfg.head_dim, cfg.rope_parameters["rope_theta"])
-                attn.qkv_proj.parity_sizes = [attn.q_size, attn.kv_size, attn.kv_size]
-                attn.qkv_proj.forward = types.MethodType(split_linear, attn.qkv_proj)
-                layer.mlp.gate_up_proj.parity_sizes = [cfg.intermediate_size] * 2
-                layer.mlp.gate_up_proj.forward = types.MethodType(split_linear, layer.mlp.gate_up_proj)
-                layer.mlp.forward = types.MethodType(mlp_forward, layer.mlp)
+            apply_bf16(self.model, vllm_config.model_config.hf_config)
 
     def embed_input_ids(self, input_ids):
         return self.model.embed_input_ids(input_ids)
