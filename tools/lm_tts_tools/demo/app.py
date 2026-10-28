@@ -5,6 +5,7 @@ import urllib.error
 import urllib.request
 
 import gradio as gr
+import soundfile as sf
 
 from .common import MODELS, REFERENCE, ROOT
 
@@ -39,31 +40,40 @@ def main():
                     greedy_cp=bool(greedy_cp), cp_temperature=float(cp_temperature), cp_top_k=int(cp_top_k),
                     cp_top_p=float(cp_top_p), seed=int(seed), max_tokens=int(max_tokens),
                     x_vector_only_mode=bool(x_vector_only_mode), non_streaming_mode=bool(non_streaming_mode))
-        req = urllib.request.Request(f'http://127.0.0.1:{ports[mode]}/synthesize',
+        req = urllib.request.Request(f'http://127.0.0.1:{ports[mode]}/synthesize_stream',
                                      data=json.dumps(data).encode(), headers={'Content-Type': 'application/json'})
         try:
             with opener.open(req, timeout=1200) as response:
-                result = json.load(response)
+                for line in response:
+                    event = json.loads(line)
+                    if event['type'] == 'error':
+                        raise gr.Error(event['detail'])
+                    if event['type'] == 'chunk':
+                        wav, sr = sf.read(event['audio'], dtype='int16')
+                        yield (sr, wav), None, f"已收到第 {event['index']+1} 块音频 · {event['elapsed_seconds']:.2f} 秒"
+                    elif event['type'] == 'result':
+                        result = event
+                        info = (f"{mode} · step-{model}｜音频 {result['audio_seconds']:.2f} 秒"
+                                f"｜首块 {result['first_audio_seconds']:.2f} 秒｜合成 {result['seconds']:.2f} 秒"
+                                f"｜{result['chunks']} 块｜CP {'greedy' if greedy_cp else 'sampling'}")
+                        yield gr.skip(), result['audio'], info
         except urllib.error.HTTPError as exc:
             raise gr.Error(json.loads(exc.read()).get('detail', str(exc))) from exc
         except urllib.error.URLError as exc:
             raise gr.Error('所选推理服务正在启动或暂不可用，请稍后重试') from exc
-        info = (f"{mode} · step-{model}｜音频 {result['audio_seconds']:.2f} 秒｜合成 {result['seconds']:.2f} 秒"
-                f"｜模型加载 {result['load_seconds']:.2f} 秒｜CP {'greedy' if greedy_cp else 'sampling'}")
-        return result['audio'], info
 
     config = json.loads((MODELS['56384']['source'] / 'config.json').read_text())
     languages = ['Auto'] + [s.capitalize() for s in config['talker_config']['codec_language_id'] if 'dialect' not in s]
     with gr.Blocks(title='LM-TTS · PyTorch / vLLM') as demo:
-        gr.Markdown('# LM-TTS 声音克隆试听\n选择 PyTorch 原 demo 或 vLLM 插件，使用相同参考音频比较。两种模式当前尚未完全数值对齐。')
+        gr.Markdown('# LM-TTS 声音克隆试听\nvLLM 支持边生成边播放。step-10000 的 PyTorch 基线使用 UltraEval 相同的 LM-TTS 推理实现；PyTorch 当前整段返回。两种模式尚未完全数值对齐。')
         with gr.Row():
             with gr.Column():
-                mode = gr.Radio([('PyTorch（原 demo）', 'pytorch'), ('vLLM（原生插件）', 'vllm')], value='pytorch', label='推理模式')
-                model = gr.Dropdown([('Emilia step-56384', '56384'), ('Emilia step-10000（5×10 interleaved）', '10000')], value='56384', label='模型')
+                mode = gr.Radio([('PyTorch（BF16 基线）', 'pytorch'), ('vLLM（原生插件）', 'vllm')], value='vllm', label='推理模式')
+                model = gr.Dropdown([('Emilia step-56384', '56384'), ('Emilia step-10000（5×10 interleaved）', '10000')], value='10000', label='模型')
                 ref_audio = gr.Audio(value=REFERENCE, type='filepath', label='参考音频（最长 30 秒）')
                 ref_text = gr.Textbox(value='在此奉劝大家别乱打美白针。', label='参考音频文本', lines=2)
                 x_vector_only_mode = gr.Checkbox(value=False, label='仅克隆说话人音色（无需参考文本）')
-                non_streaming_mode = gr.Checkbox(value=True, label='一次性输入文本（关闭为 Qwen overlay，尚非训练的 5×10 streaming）')
+                non_streaming_mode = gr.Checkbox(value=False, label='一次性输入全部文本（关闭：10000 使用 5×10；56384 使用 Qwen overlay）')
                 text = gr.Textbox(value='你好，这是语音合成测试。', label='要合成的文本', lines=3)
                 language = gr.Dropdown(languages, value='Auto', label='语言')
                 preset = gr.Radio(list(PRESETS), value='评测默认采样', label='采样预设')
@@ -77,15 +87,16 @@ def main():
                     cp_top_k = gr.Slider(0, 100, value=50, step=1, label='Code predictor top-k（0 不限制）')
                     cp_top_p = gr.Slider(0.05, 1, value=1, step=0.05, label='Code predictor top-p')
                     seed = gr.Number(value=42, precision=0, label='随机种子')
-                    max_tokens = gr.Slider(2, 2048, value=512, step=1, label='最大生成帧数')
+                    max_tokens = gr.Slider(3, 2048, value=512, step=1, label='最大生成帧数')
                 run = gr.Button('合成', variant='primary')
             with gr.Column():
-                audio = gr.Audio(label='合成结果')
-                info = gr.Markdown('首次加载及切换模型可能需要数分钟。step-10000 的训练 5×10 streaming 协议正在接入，当前页面仍返回完整音频。')
+                audio = gr.Audio(label='实时播放', streaming=True, autoplay=True)
+                complete_audio = gr.Audio(label='完整音频')
+                info = gr.Markdown('首次加载及切换模型可能需要数分钟。vLLM 音频分块返回与文本输入方式分别控制。')
         preset.change(lambda p: PRESETS[p], preset, [temperature, top_k, top_p, penalty, greedy_cp, cp_temperature, cp_top_k, cp_top_p])
         run.click(synthesize, [mode, model, ref_audio, ref_text, text, language, temperature, top_k, top_p, penalty,
                               greedy_cp, cp_temperature, cp_top_k, cp_top_p, seed, max_tokens,
-                              x_vector_only_mode, non_streaming_mode], [audio, info],
+                              x_vector_only_mode, non_streaming_mode], [audio, complete_audio, info],
                   api_name='synthesize', concurrency_limit=1)
     demo.queue().launch(server_name='0.0.0.0', server_port=args.port,
                         allowed_paths=[str(ROOT / 'results/demo'), REFERENCE])

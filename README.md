@@ -37,8 +37,9 @@ PyTorch 推理或原生 vLLM 插件，并支持 Talker / CP 采样。
 
 - 两份指定模型的 speaker+ICL 推理已验证；开发分支新增仅 speaker embedding
   克隆、两种文本条件方式与混合批量请求，逐项验证记录见兼容矩阵。
-- step-100 的训练是 mixed interleaved 5×10。Qwen 的 `non_streaming_mode=False`
-  文本条件方式、训练的交错协议以及音频分块返回是不同概念，需分别验证。
+- 当前 demo 已将 step-100 替换为 step-10000。新模型使用训练的 5×10 interleaved
+  协议，并支持原生音频分块；实现和验证方式见 [interleaved.md](docs/interleaved.md)。
+  BF16 数值对齐仍需单独验收。
 - 旧数值对齐工具通过 vLLM causal pooling 获取未归一化的最后一个 hidden state，每步提交完整 embedding
   前缀。`--engine-mode reference` 重算前缀；`--engine-mode cached` 使用 vLLM 基于
   embedding 内容哈希的 prefix cache，复用完整的 16-token KV blocks，只计算未命中的尾部。
@@ -71,7 +72,19 @@ export PYTHONPATH="$PWD/tools:$PWD/src${PYTHONPATH:+:$PYTHONPATH}"
 本工作区的 `envs/lm-tts` 与 `UltraEval-Audio/envs/tts` 这三项版本相同，且
 Qwen-TTS modeling / inference 源文件的 SHA256 相同。
 
-## 准备两个模型
+## 准备当前模型
+
+step-10000 已是导出的模型，不需要再次导出：
+
+```bash
+MODEL_NEW="$(realpath ../UltraEval-Audio/init_model/emilia-v4-emilia2-cbinit-langid-interleaved5x10-step-00010000)"
+$TTS_PYTHON -m lm_tts_tools.prepare_native --model "$MODEL_NEW" --output artifacts/native-10000
+```
+
+以下 step-100 导出与旧 pooling 比较命令用于复现历史验证；新模型的基线使用
+`lm_tts_tools.training_reference` 和 demo 中的 LM-TTS CodecSynthesizer。
+
+## 历史模型准备
 
 在本仓库目录执行。原始模型保持只读，生成文件位于被 Git 忽略的 `artifacts/`。
 训练 checkpoint 使用原仓库的导出器，校验 assembly identity，导出 FP32 权重以免

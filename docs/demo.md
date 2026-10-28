@@ -3,19 +3,21 @@
 启动后的页面：`http://10.119.16.21:7861`。原 `tts-demo` 服务已停，新的界面与服务代码
 全部位于本仓库 `tools/lm_tts_tools/demo/`。不进入纯插件 wheel。
 
-- PyTorch：原 demo 的 Qwen-TTS / BF16 SDPA；使用 `envs/lm-tts` 原基线环境。
+- PyTorch：step-56384 使用原 demo Qwen-TTS；step-10000 使用 UltraEval 相同的
+  LM-TTS CodecSynthesizer。均为 BF16 SDPA，使用 `envs/lm-tts` 原基线环境。
 - vLLM：标准 Omni SDK 加载本插件，Talker 与 CP attention 均为 FA2；使用独立
   Omni 环境。CP greedy 保留 CUDA graph，CP sampling 暂用 eager FA2。
 - 模型列表为 step-56384 / step-10000；step-10000 替换原 step-100。
   新模型来源为 `UltraEval-Audio/init_model/emilia-v4-emilia2-cbinit-langid-interleaved5x10-step-00010000`，
-  原生模型视图为 `artifacts/native-10000`。5×10 interleaved 协议尚在接入，
+  原生模型视图为 `artifacts/native-10000`。协议实现见 [interleaved.md](interleaved.md)。
   原 step-100 的验证结果不能作为新模型的验证结果。
 - 支持上传参考音频、语言、两个原 demo 预设、greedy 对齐预设，
   以及 Talker / CP 独立 temperature、top-k、top-p、重复惩罚和种子。
-- 开发分支新增仅 speaker embedding 克隆（参考文本可空），以及
-  `non_streaming_mode` 文本条件切换。关闭该选项不代表音频分块返回。
-  已构建并检查新版 UI schema；在线服务仍使用主分支版本。
-- 默认每次最多 512 帧，开发版可调至 2048（在线旧版为 1024）；参考音频最长 30 秒。两个后端各驻留一个模型，
+- 支持仅 speaker embedding 克隆（参考文本可空）和 `non_streaming_mode` 文本条件切换。
+  step-10000 关闭此选项使用训练的 5×10 布局；step-56384 使用 Qwen overlay。
+- vLLM 音频通过 streaming Audio 组件边生成边播放，结束后提供完整 WAV。
+  PyTorch 基线目前整段返回。两种模式都显示首块返回时间（不含模型加载）。
+- 默认每次最多 512 帧，可调至 2048；参考音频最长 30 秒。两个后端各驻留一个模型，
   切换 checkpoint 会重新加载，vLLM 首次加载可能需要数分钟。
 - 两种引擎的 RNG 算法及运算不同，相同 seed 不保证跨引擎生成相同 codec。
   当前完整 BF16 codec 对齐尚未通过；本页用于试听，不执行质量评分。
@@ -38,7 +40,7 @@ tmux new-session -d -s lm-tts-demo 'bash scripts/run_demo.sh'
 Gradio 页面监听 `0.0.0.0:7861`。
 
 日志与 PID：`results/demo-service/`。每次合成保存 WAV 和请求参数 JSON 到
-`results/demo/`；vLLM 另存 codec NPY。可通过后端 `/health` 查看已加载模型。
+`results/demo/`，并保留逐块 WAV。可通过后端 `/health` 查看已加载模型。
 
 CP 训练侧选择 SDPA 是为了避开大 frame batch 下 FA2 deterministic backward
 的 workspace 失败；这里仅执行 forward，因此不受该训练限制。采样过滤行为

@@ -4,6 +4,7 @@ cd "$(dirname "$0")/.."
 export PYTHONPATH="$PWD/src:$PWD/tools${PYTHONPATH:+:$PYTHONPATH}"
 export GRADIO_ANALYTICS_ENABLED=False
 export VLLM_WORKER_MULTIPROC_METHOD=spawn
+export VLLM_PLUGINS=lm_tts,vllm_omni_register_models
 unset all_proxy ALL_PROXY http_proxy HTTP_PROXY https_proxy HTTPS_PROXY
 TTS_PYTHON=${TTS_PYTHON:-/workspace/workspace/yanglin/envs/lm-tts/bin/python}
 OMNI_PYTHON=${OMNI_PYTHON:-/tmp/lm-tts-omni/bin/python}
