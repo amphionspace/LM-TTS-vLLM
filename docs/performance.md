@@ -18,23 +18,21 @@ teacher-forced 与 free-running 之间清空 cache；质量与速度数据不能
 ## 完整推理通路的要求
 
 1. Talker、code predictor 的逐帧调用应在 GPU worker 内完成，使用请求独立的状态，
-   消除当前 Python 进程间每帧往返。真正的 autoregressive decode 复用 KV cache，
+   正式原生路径已消除对齐工具的逐帧 IPC。真正的 autoregressive decode 复用 KV cache，
    不能把每步全前缀重算包装成最终加速版本。
-2. code predictor 的 15 步 greedy 解码已实现帧内 cache 和 CUDA graph，并通过
-   两份模型共 13 个输入的 graph/eager 一致性与 cache 重用检查。随机采样、批量
-   请求和原生调度集成仍未完成。
-   推理中的帧 embedding 求和必须保持 demo 的 `stack/sum` 语义，不能随意替换成
-   逐 codebook 的 BF16 连加。采样和 codec 0 / EOS mask 也必须保持原协议。
+2. code predictor 已接入原生 Omni 调度，支持 greedy 和随机采样；greedy 的独立
+   CUDA graph 已有局部验证，sampling 当前使用 eager FA2。批量 CP 仍需优化，
+   功能冒烟不能替代端到端吞吐验收。帧 embedding 的求和必须按 checkpoint 协议：
+   step-10000 的训练布局采用逐 codebook BF16 连加，旧 Qwen 路径保留原来的求和语义。
 3. 逐项验证 CUDA graph、融合 norm/activation、continuous batching、异步输出。
    多请求的 speaker/ref-code/hidden state 必须隔离，并验证取消、结束与重用时的清理。
 4. 音频 decoder 的流式块必须是增量输出，参考音频裁剪和边界上下文不能因加速改变。
 5. interleaved 5×10 是独立输入协议，需要按照训练和 `local_interleaved.py` 验证。
    当前 non-streaming 跑通不能代替 interleaved streaming 验收。
 
-官方 vLLM-Omni 的 Talker/MTP、请求状态与多阶段输出接口可以作为实现参考；不能直接
-假设其默认 prompt、codec mask、采样和本项目完全一致。当前查到的 PyPI vLLM-Omni
-0.30.0 要求 Transformers `<5.15`，与 vLLM 0.32.0 的 `>=5.16.1` 不兼容，不能在正式
-环境里忽略依赖约束后宣称获得支持。需要选定兼容版本/提交并完成上述回归。
+当前原生 pipeline 使用固定 vLLM-Omni 提交，版本与已知边界见 [README](../README.md)。
+step-10000 的全文输入 5×10 和音频分块已验证；真正客户端文本续传尚未打通，
+当前原型被 stage 1 runner v2 不支持 resumable input 的检查拒绝。
 
 ## 验收数据
 

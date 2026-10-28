@@ -1,5 +1,8 @@
 # Qwen-TTS 功能兼容进度
 
+> 本页含 step-100 的历史验证，不能自动推广到 step-10000。当前模型与整体进度以
+> [README](../README.md) 为准。客户端文本续传仍未完成，音频分块不等于输入流式。
+
 目标以原 `qwen_tts.Qwen3TTSModel` 的公开推理接口为准，先补功能，再集中检查
 数值差异与性能。功能开发与验证在独立 `feat/qwen-tts-compat` worktree 中进行。
 

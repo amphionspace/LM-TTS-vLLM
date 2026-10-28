@@ -1,5 +1,8 @@
 # 双模式 Gradio 试听
 
+> 当前线上版只有 vLLM 音频分块输出，没有客户端持续追加文本。
+> 完整进度、未完成原型和阻塞见 [README](../README.md)。页面可访问不代表后端已就绪。
+
 启动后的页面：`http://10.119.16.21:7861`。原 `tts-demo` 服务已停，新的界面与服务代码
 全部位于本仓库 `tools/lm_tts_tools/demo/`。不进入纯插件 wheel。
 
@@ -44,7 +47,7 @@ tmux new-session -d -s lm-tts-demo 'bash scripts/run_demo.sh'
 Gradio 页面监听 `0.0.0.0:7861`。
 
 日志与 PID：`results/demo-service/`。每次合成保存 WAV 和请求参数 JSON 到
-`results/demo/`，并保留逐块 WAV。可通过后端 `/health` 查看已加载模型。
+`results/demo/`，并保留逐块 WAV。应等待两个后端 `/health` 均返回 `ready: true`，再测试合成。
 
 CP 训练侧选择 SDPA 是为了避开大 frame batch 下 FA2 deterministic backward
 的 workspace 失败；这里仅执行 forward，因此不受该训练限制。采样过滤行为

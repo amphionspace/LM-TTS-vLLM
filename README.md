@@ -1,232 +1,190 @@
 # LM-TTS-vLLM
 
-针对本地 Emilia Qwen3-TTS checkpoint 的 **vLLM 0.32.0 外部模型插件**，以
-`tts-demo/app.py` 和 `UltraEval-Audio/scripts/voice_clone_infer.py` 的
-**BF16 + PyTorch SDPA** 推理为数值基准。
+为 Emilia / LM-TTS checkpoint 提供 **vLLM 外部模型插件**。目标是在遵循训练和
+UltraEval 推理协议的前提下，对齐 PyTorch BF16 推理，同时获得原生 vLLM 的速度与服务能力。
 
-原生 TTS pipeline 通过 vLLM-Omni 调度 Talker、code predictor 和音频解码。
-Talker / code predictor 使用 FlashAttention，CP 支持 greedy CUDA graph 和
-eager 采样。模型适配代码均位于纯插件包中，无需修改 vLLM。
+**当前状态（2026-10-28）：能通过原生 vLLM 生成和分块输出音频，但项目尚未完成。
+客户端持续追加文本的真正流式输入尚未打通，完整 BF16 codec 一致性与性能也尚未验收。**
 
-独立数值对齐工具仍保留原来的 `qwen-tts` 前端与 PyTorch CP 对照路径；它们
-通过进程隔离保留原 demo 的 Transformers 4.57.3，与原生运行时的 Transformers
-5.x 共存。功能兼容范围与实际验证状态见 [Qwen-TTS 兼容矩阵](docs/qwen-compatibility.md)。
+## 最终要实现什么
 
-## 包边界与最终启动方式
+1. **纯插件接入**：安装后由 vLLM / vLLM-Omni 的插件入口自动注册；模型计算位于
+   `src/lm_tts_vllm/`，不要求用户启动本仓库专用 client 或 worker。
+2. **正确的推理协议**：支持 step-56384 和新的 step-10000；后者严格遵循训练的
+   5 个文本 token / 10 帧音频交错布局，正确处理参考音频、文本 EOS、音频 EOS 和长度限制。
+3. **真正的文本与音频双向流式体验**：同一个请求保留 KV 状态，文本分段到达；
+   全部文本到达之前即可产出并播放音频，缺少后续文本时等待，明确结束输入后再收尾。
+   正常追加每段文本不重启服务、不重新加载模型、不拆成多个独立 TTS 请求拼接。
+4. **与实际 BF16 基线对齐**：使用原 demo / UltraEval 的实际模型、输入、采样和解码协议。
+   分别比较同前缀 hidden/logits、greedy codec、EOS 和长度。不能用“能出声音”代替精度验收。
+5. **精度和速度都要**：前期允许关闭优化定位问题，最终须验证 KV cache、CUDA graph、
+   批处理与采样配置的正确性及端到端收益。正式原生 attention 使用 FlashAttention，不以 SDPA 冒充 vLLM 加速。
+6. **可试听的双模式 demo**：PyTorch / vLLM 可切换，支持真实采样；流式输入页面显示
+   已接收文本、已提交给模型的文本以及等待/生成/输入结束状态。
 
-- `src/lm_tts_vllm/`：纯 vLLM 插件，只包含注册、模型和计算实现。主 wheel 不包含工具包，
-  不导入 Qwen-TTS 前端，不创建自定义 client/worker，也不包含 SDPA 替换诊断。
-- `tools/lm_tts_tools/`：独立开发工具包，包含转换、基线、对齐、UltraEval 适配以及环境隔离进程。
-  `tools/pyproject.toml` 可以单独安装；运行插件不要求安装它。
-- `tests/`、`docs/`、`scripts/`：验证、记录与开发辅助，不属于插件的运行依赖。
+当前不要求 CER/WER 或说话人评分。CustomVoice / VoiceDesign 需要对应权重，不能仅靠 Base 权重声明支持。
 
-最终启动约定是安装插件后由运行时加载 entry point，用户不需要另行启动本仓库
-的 client 或 worker。`vllm.general_plugins` 注册用于对齐的 `LMTTSTalkerModel`；
-可选 `vllm_omni.general_plugins` 注册完整的原生 TTS 两阶段 pipeline。
+## 当前做到什么程度
 
-原生 pipeline 已通过标准 Omni API 生成音频和 codec，使用上游调度、KV cache
-和音频输出协议，不使用开发工具的进程桥接。标准 CLI 自动加载与语音 HTTP
-接口已验证，见 [原生服务](docs/native-serving.md)。**完整 codec 一致性及性能
-配置尚未验收**，详见 [原生接入状态与边界](docs/native-pipeline.md)。
-下面的隔离工具仍用于保留原 Torch / Transformers 环境的数值基线。
+下表描述 `main` 的能力。历史 step-100 的验证不能自动算作 step-10000 已通过。
 
-## 当前边界
+| 项目 | 当前状态 | 边界 |
+| --- | --- | --- |
+| 外部模型注册、标准 Omni CLI / HTTP | 已实现并有功能验证 | 完整 TTS pipeline 依赖固定提交的 vLLM-Omni |
+| 原生 Talker + code predictor + Code2Wav | 已跑通 | 不再通过对齐工具逐帧 IPC 驱动正式 demo |
+| BF16、Talker / CP FlashAttention、KV cache | 已接入 | 不代表与 PyTorch 完整数值一致 |
+| Talker / CP greedy 与随机采样 | 已验证功能 | CP greedy 有独立 CUDA graph；CP 采样当前用 eager |
+| step-10000 的 5×10 模型内部布局 | 已实现并验证布局与音频输出 | 输入仍然是一次提交全文 |
+| vLLM 分块音频输出 | 已验证 | Gradio / 浏览器有转码和播放缓冲 |
+| PyTorch demo 基线 | 可用 | 当前上线版整段生成后返回 |
+| 同一请求持续追加文本 | **未完成** | 开发原型首轮端到端测试被上游能力检查拒绝 |
+| 输入文本进度指示、新的输入方式 UI | **未上线** | 仅在未完成原型中；当前页面仍有旧文本布局复选框 |
+| BF16 完整 codec / 长序列一致性 | **未验收** | 当前只有局部数值对照，不能宣称精度已对齐 |
+| 高吞吐、并发、端到端加速收益 | **未验收** | 当前 demo 单请求配置，测试 GPU 存在其他负载 |
 
-双模式 Gradio 试听页面及启动说明见 [demo.md](docs/demo.md)，界面可选择原
-PyTorch 推理或原生 vLLM 插件，并支持 Talker / CP 采样。
+参考音频＋参考文本的 ICL 克隆已可用。仅说话人向量克隆保留在后端，页面已去掉该选项。
+更详细的功能记录见 [兼容矩阵](docs/qwen-compatibility.md)，其中旧模型用例均须按记录的 checkpoint 解读。
 
-- 两份指定模型的 speaker+ICL 推理已验证；开发分支新增仅 speaker embedding
-  克隆、两种文本条件方式与混合批量请求，逐项验证记录见兼容矩阵。
-- 当前 demo 已将 step-100 替换为 step-10000。新模型使用训练的 5×10 interleaved
-  协议，并支持原生音频分块；实现和验证方式见 [interleaved.md](docs/interleaved.md)。
-  BF16 数值对齐仍需单独验收。
-- 旧数值对齐工具通过 vLLM causal pooling 获取未归一化的最后一个 hidden state，每步提交完整 embedding
-  前缀。`--engine-mode reference` 重算前缀；`--engine-mode cached` 使用 vLLM 基于
-  embedding 内容哈希的 prefix cache，复用完整的 16-token KV blocks，只计算未命中的尾部。
-  两者都仍有逐帧 IPC，尚不是完整的高吞吐 serving 实现。
-- 当前 TP/PP 固定为 1，Talker 关闭 CUDA graph 和量化，code predictor 可独立启用 graph。
-  这是验证阶段的设置，完整实现必须同时
-  验收精度和速度，见 [性能与精度验收](docs/performance.md)。
-- `bf16` profile 保留原 PyTorch 的 RMSNorm、残差、RoPE、SiLU 乘法的舍入边界，并分别
-  计算 Q/K/V 和 gate/up 投影；attention 仍使用 vLLM FlashAttention backend。
-  `native` profile 保留 vLLM 原生融合算子，可用于误差对照。
-- 不承诺 BF16 不同 attention 内核逐 bit 相同。先用相同前缀做 teacher-forced 比较，
-  再检查 free-running codec 的首个分歧位置，避免把误差累积误认为权重/协议错误。
+## 三种容易混淆的“流式”
 
-## 环境
+| 含义 | 当前上线版是否支持 |
+| --- | --- |
+| 模型内部按 5×10 交错消费预先给定的全文 | 是，step-10000 |
+| 音频每生成一块就传给播放器 | 是，vLLM；不是 PyTorch 基线 |
+| 客户端后续才发送新文本，并继续同一个推理会话 | **否** |
 
-推荐两个独立环境，不要升级正在使用的 demo 环境。
+页面的 `non_streaming_mode` 旧复选框只改变文本条件布局，不代表客户端可以追加文本。
+“实时播放”表示分块音频输出，不保证零缓冲，也不表示已达到低延迟性能目标。
+首块音频返回时间、浏览器开始播放时间、整段生成耗时是三个不同指标。
 
-```bash
-# vLLM 环境：使用支持 vLLM 0.32.0 的 Python/CUDA 环境
-python3.12 -m venv .venv-vllm
-.venv-vllm/bin/pip install -e '.[engine]'
+## 真正流式输入：原型与明确阻塞
 
-# 前后处理：使用原 demo / evaluation 环境
-export TTS_PYTHON=../envs/lm-tts/bin/python
-export VLLM_PYTHON="$PWD/.venv-vllm/bin/python"
-export PYTHONPATH="$PWD/tools:$PWD/src${PYTHONPATH:+:$PYTHONPATH}"
+未完成代码保存在 `feat/qwen-tts-compat` 分支（`32e2864`），**不合并进当前可用的 main**。
+原型包含文本分块缓冲、会话接口、输入进度 UI，以及通过标准
+`AsyncOmni.generate(StreamingInput)` 续传同一个请求的尝试。
+
+首轮端到端测试未通过，上游返回：
+
+```text
+streaming (resumable) input is not supported:
+stage 1 runs on model_runner v2, which supports turn-based requests only;
+use model_runner: v1 for that stage
 ```
 
-前后处理环境使用 `torch==2.8.0+cu126`、`transformers==4.57.3`、`qwen-tts==0.1.1`。
-本工作区的 `envs/lm-tts` 与 `UltraEval-Audio/envs/tts` 这三项版本相同，且
-Qwen-TTS modeling / inference 源文件的 SHA256 相同。
+当前部署两个阶段都使用 runner v2。这说明现有原型配置不可用；不能只隐藏异常，
+也不能直接宣称改成 v1 就完成了。必须确认解码阶段的 runner / connector 兼容性，
+然后验证跨文本段的 KV、参考音频、codec 历史和终止状态都能正确延续。
 
-## 准备当前模型
+当前运行进程没有加载这套原型，也没有追加文本接口。完成实现后需要一次部署重启；
+部署成功后的日常分段提交不应再要求重启。现有线上服务保持可用，开发验证应独立进行。
 
-step-10000 已是导出的模型，不需要再次导出：
+## 已验证的证据与仍然缺失的证据
 
-```bash
-MODEL_NEW="$(realpath ../UltraEval-Audio/init_model/emilia-v4-emilia2-cbinit-langid-interleaved5x10-step-00010000)"
-$TTS_PYTHON -m lm_tts_tools.prepare_native --model "$MODEL_NEW" --output artifacts/native-10000
-```
+- step-10000 的 23,850 组前缀布局与 LM-TTS-Training 协议一致。
+- 长文本样例有 35 个额外文本位置、115 个调度步骤，输出
+  `10 + 25 + 25 + 19 = 79` 帧音频，即 24 kHz 下 151,680 samples / 6.32 秒。
+  这验证布局、分块和截断，不验证跨引擎 codec 一致性。
+- 共享参考 codec / speaker 条件的一个 BF16 样例，修正 BOS 文本投影批次后，
+  prefill embedding 的 `104 × 1024` 元素完全一致。
+  首步 hidden 最大绝对误差 `0.09375`，logits 最大绝对误差 `0.09375`，
+  两边原始 argmax 均为 `892`。这只是一个前缀的结果，不是整条生成序列通过。
+- 在线验证覆盖 interleaved / 非流式布局、ICL / 仅音色、greedy / 采样，
+  并验证了固定用例的同 seed 重复输出和逐块 PCM 拼接等于完整 WAV。
+- Gradio 上传、分块转码与完整音频下载已有验证；新默认参考音频已通过 vLLM
+  采样冒烟，返回两块、总计 1.84 秒音频（24 帧上限用例，不是自然结束或速度基准）。
+- **尚缺**：完整序列 teacher-forced 对照、完整 codec 分歧分析、真实文本续传成功样例、
+  浏览器双向流式体验、多请求生命周期回归、统一配置的性能报告。
 
-以下 step-100 导出与旧 pooling 比较命令用于复现历史验证；新模型的基线使用
-`lm_tts_tools.training_reference` 和 demo 中的 LM-TTS CodecSynthesizer。
+本地验证结果不随 Git 发布。部分早期开发结果归档在
+`results/archive/feat-qwen-tts-compat/`；线上记录在 `results/demo-service/`。
+数值证据主要来自 `interleaved-10000-shared-reference-v2`，默认参考冒烟记录为
+`results/demo-service/default-reference-smoke.json`。旧结果里的参考音频可能不同于当前默认值。
 
-## 历史模型准备
+## 模型与默认参考
 
-在本仓库目录执行。原始模型保持只读，生成文件位于被 Git 忽略的 `artifacts/`。
-训练 checkpoint 使用原仓库的导出器，校验 assembly identity，导出 FP32 权重以免
-在导出时额外舍入；实际加载和推理仍统一为 BF16。
+| 模型 | 当前用途 | 源路径（工作区相对路径） |
+| --- | --- | --- |
+| step-10000 | 当前默认，5×10 interleaved | `../UltraEval-Audio/init_model/emilia-v4-emilia2-cbinit-langid-interleaved5x10-step-00010000` |
+| step-56384 | 保留的旧模型 | `../UltraEval-Audio/init_model/emilia-v4-emilia2-cbinit-langid-step-00056384` |
+| step-100 | 仅历史验证 | 已从 demo 模型列表替换掉 |
 
-```bash
-MODEL1="$(realpath ../UltraEval-Audio/init_model/emilia-v4-emilia2-cbinit-langid-step-00056384)"
-bash scripts/export_step100.sh
-MODEL2="$PWD/artifacts/step-00000100"
+原始权重保持只读，转换后的原生模型视图在 `artifacts/native-10000` / `artifacts/native-56384`。
+默认参考音频已移动至 [`assets/reference/vo_anecdote_part1_4_zhongli_04.wav`](assets/reference/vo_anecdote_part1_4_zhongli_04.wav)。
+默认文本：
 
-$TTS_PYTHON -m lm_tts_tools.prepare --model "$MODEL1" --output artifacts/backbone-56384
-$TTS_PYTHON -m lm_tts_tools.prepare --model "$MODEL2" --output artifacts/backbone-100
-```
+> 早听说枫丹的土壤水质都与璃月大不相同，不知道这枫丹种出来的茶叶，究竟是什么味道。
 
-`prepare` 提取 Talker 的 layers、norm、codec embedding，保留原权重 dtype；通过
-`source.json` 记录来源。音频/文本的三个 MRoPE 位置轴相同，因此可以映射为普通
-一维 RoPE；前端会检查此条件，拒绝其他位置布局。
+step-10000 的 PyTorch 基线使用 `LM-TTS-Training` 的 `CodecSynthesizer`，
+与 `UltraEval-Audio/scripts/local_qwen.py` 调用的实现一致，BF16 + SDPA。
+step-56384 使用原 Qwen-TTS demo 路径。参考音频编码前处理的差异需单独核查，
+共享参考条件的 Talker 对照不能代替整个前处理链路的对齐。
 
-## 推理与 BF16 对齐
+## 运行现有 demo
 
-```bash
-CUDA_VISIBLE_DEVICES=6 $TTS_PYTHON -m lm_tts_tools.infer \
-  --model "$MODEL1" --backbone artifacts/backbone-56384 \
-  --vllm-python "$VLLM_PYTHON" --mode compare \
-  --reference-audio ../UltraEval-Audio/raw_data/voice_clone_manifests/seed_tts_eval_zh/000000.wav \
-  --reference-text '在此奉劝大家别乱打美白针。' \
-  --text '简单地说，这相当于惠普把消费领域市场拱手相让了。' \
-  --language Auto --greedy --max-new-tokens 256 \
-  --output results/56384-greedy
-```
-
-第二个模型将 `--model` 换成 `$MODEL2`、`--backbone` 换成 `artifacts/backbone-100`。
-输出目录必须是新目录。
-
-- `--mode pytorch`：原 demo 基线、codec tokens、逐步输入/hidden trace。
-- `--mode vllm`：通过插件生成音频。
-- `--mode compare`：原 PyTorch 基线 → 同前缀 vLLM 数值比较 → vLLM 自由生成。
-- `--greedy`：Talker 和 code predictor 都取 greedy，先排除采样器差异。
-- 去掉 `--greedy`：使用 UltraEval 默认采样参数（两个阶段均 T=0.9、top-k=50；
-  Talker repetition penalty=1.05）。相同随机种子不保证不同 logits 采到同一 token。
-- demo 的低温 preset：`--temperature 0.3 --top-k 10 --repetition-penalty 2.0 --code-predictor-greedy`。
-- `--precision-profile native`：对照 vLLM 原始融合算子。
-- `--attention-backend FLASH_ATTN|FLASHINFER|TRITON_ATTN`：选择 vLLM 原生 attention backend，
-  默认 `FLASH_ATTN`。可用性由当前 GPU 和 vLLM 校验；报告记录实际 backend、实现类和 FA 版本。
-- **仅用于诊断** `--precision-profile sdpa --engine-mode reference`：在相同 vLLM 权重和 BF16 算术下
-  使用 PyTorch SDPA，定位 attention 内核差异。它仅支持单请求完整前缀，是诊断模式，
-  不能用来宣称 paged attention 或 CUDA graph 性能。
-- `--engine-mode cached`：验证 KV cache 复用；teacher-forced 完成后先清空缓存，再测自由生成，
-  避免参考 trace 预先填满缓存而美化速度结果。
-- `--reference-run results/已有基线`：重放已保存的相同请求，避免重复基线推理。
-- 回归门槛：`--require-identical-codes --greedy` 要求完整 codec 序列及长度一致；
-  `--max-logit-error <容差>` 检查 teacher-forced 最大绝对误差。超出门槛时保留报告并返回非零退出码。
-
-`report.json` 包含运行版本、逐步 hidden/logits 误差、有效 codec 范围内的原始 argmax
-一致率、top-2 margin、自由生成的 token 一致率和首个不同帧。
-argmax 比较尚未施加 repetition penalty，不等同于最终采样决策。
-`reached_token_limit=true` 表示音频达到生成上限，不应当作自然 EOS 完成的样本。
-`*-codes.npy` 是生成 codebook 序列，`*.wav` 是 24 kHz 音频，`trace.pt` 用于重放。
-新运行同时记录 RTF、首个 codec frame 延迟、Talker engine 耗时和 prefix cache 命中量。
-首个 codec frame 延迟不等于首个可播放音频的延迟；当前入口在完整解码后才输出 WAV。
-
-## 沿用 UltraEval 的实际入口
-
-step-56384 现有评测记录为 `speaker_icl`、`non_streaming=true`、`language_auto=true`、
-`batch_size=1`。以下适配器直接执行原 `voice_clone_infer.py`，保留原 manifest、seed、
-sampling、解码与 reference 裁剪，只在每次请求期间替换 Talker backbone：
+以下命令面向已经准备好权重、依赖及本地环境的当前工作区，不是一键干净环境安装教程。
 
 ```bash
-CUDA_VISIBLE_DEVICES=6 $TTS_PYTHON -m lm_tts_tools.ultraeval \
-  --ultraeval-root ../UltraEval-Audio \
-  --backbone artifacts/backbone-56384 --vllm-python "$VLLM_PYTHON" \
-  --worker-log "$PWD/results/eval-56384-vllm.log" -- \
-  --model emilia-56384-vllm --model-path "$MODEL1" \
-  --conditioning speaker_icl --non-streaming --language-auto --batch-size 1 \
-  --manifest-dir raw_data/voice_clone_manifests \
-  --run-dir "$PWD/results/ultraeval-56384" --limit 1
+# 在仓库根目录执行；按空闲 GPU 调整
+PYTORCH_GPU=5 VLLM_GPU=6 bash scripts/run_demo.sh
+
+# 页面启动不代表模型已就绪，必须检查后端
+curl --noproxy '*' http://127.0.0.1:7862/health
+curl --noproxy '*' http://127.0.0.1:7863/health
 ```
 
-适配器另外写出 `*.plugin.json` 标识 vLLM 环境与插件参数；原评测配置中的 `qwen_tts`
-仍描述前后处理入口。请使用全新的评测目录，不与纯 PyTorch 结果混用。
-交错 streaming 的原评测路径为 `local_interleaved.InterleavedVoiceClone` →
-`lm_tts.inference.codec.CodecSynthesizer`；当前适配器会拒绝该模式。
+页面为 `http://<服务器地址>:7861`，后端仅监听本机 7862 / 7863。
+健康接口应返回对应模型和 `ready: true`；冷启动可能需要数分钟。
+启动脚本会同时管理三个进程，任一退出会清理其他进程，因此重启页面目前也会影响后端。
+日志和 PID 位于 `results/demo-service/`，合成音频与请求参数位于 `results/demo/`。
 
-## 测试
+当前环境：
 
-```bash
-PYTHONPATH=src:tools $TTS_PYTHON -m unittest discover -s tests -v
-```
+- 原生环境：`/tmp/lm-tts-omni/bin/python`，vLLM `0.32.0`、Transformers `5.19`。
+- vLLM-Omni 固定提交：`ee37ec0620a99b3787dab5e5e3bd1f5cdfd0615f`。
+  启动时仍有版本号不匹配警告，当前组合有功能验证，不代表所有上游功能兼容。
+- 基线环境：`../envs/lm-tts/bin/python`，Torch `2.8.0+cu126`、Transformers `4.57.3`、Qwen-TTS `0.1.1`。
+- 可通过 `TTS_PYTHON` / `OMNI_PYTHON` 覆盖环境路径。
+  Gradio 分块转码要求 `ffmpeg` 和 `ffprobe`；启动器支持 `artifacts/ffmpeg/bin/` 或 `FFMPEG_BIN`。
 
-测试使用安装的 Qwen-TTS 实现作为 oracle，检查 BF16 RMSNorm/残差、MRoPE 和独立投影。
-端到端 GPU 结果见本地 `results/*/report.json`，测量摘要见 [验证记录](docs/validation.md)。
-权重、环境、trace 和音频不提交到 Git。
+详见 [demo 使用说明](docs/demo.md) 和 [原生服务入口](docs/native-serving.md)。
 
-若需区分前缀重算与增量 KV 解码带来的误差，可在原 PyTorch 环境重放同一 trace：
+## 目录与开发状态
 
-```bash
-CUDA_VISIBLE_DEVICES=6 $TTS_PYTHON -m lm_tts_tools.replay \
-  --reference-run results/56384-greedy --output results/pytorch-prefix-audit.json
-```
+| 路径 | 职责 |
+| --- | --- |
+| `src/lm_tts_vllm/` | 纯插件：注册、模型适配、原生调度接口及部署配置 |
+| `tools/lm_tts_tools/` | 模型准备、PyTorch 基线、对齐诊断、demo；不进入插件 wheel |
+| `scripts/`、`tests/`、`docs/` | 启动辅助、回归检查与文档 |
+| `assets/reference/` | demo 默认参考音频 |
+| `artifacts/`、`results/`、`vendor-reference/` | 本地权重视图、结果与上游参考源码，不随 Git 发布 |
 
-此对照不使用 vLLM，也不运行 ASR 或说话人评分。
+`main` 保存可用实现和此状态文档。未完成流式输入原型单独保留在
+`feat/qwen-tts-compat`，不是交付功能。独立的 `LM-TTS-vLLM-next` 只是 Git worktree，
+不是另一个运行依赖；该工作目录现已删除，验证结果已归档，原型分支已推送保留。
+未通过的原型没有合并进 main。
 
-接口参考：[vLLM 0.32.0 release](https://github.com/vllm-project/vllm/releases/tag/v0.32.0)、
-[plugin system](https://docs.vllm.ai/en/latest/design/plugin_system/)。
+## 接下来按什么顺序做
 
-## 逐层定位原生 vLLM 的误差
+1. **打通真正文本续传**：解决 stage 1 runner 的兼容限制；验证文本不足时等待、
+   新段到达后复用同一 KV 会话、结束输入只发送一次文本 EOS、参考帧只注入一次。
+2. **以严格用例验收输入流**：第二段文本故意等第一段音频输出后才发送；
+   服务不能预先看到全文。记录每次文本到达、模型接收、首音频和结束时间。
+   验证空段、短尾段、取消、超时、长度上限和连续新会话；明确分段 tokenizer 边界语义。
+3. **上线 UI**：将旧复选框替换成“整段输入 / 流式输入”，提供发送本段、结束输入、取消，
+   显示已提交文本和等待状态。模拟输入与真实手动追加都须通过，不用全量预填伪装流式。
+4. **完成 BF16 验收**：先隔离参考前处理差异，再比较同前缀 hidden/logits，
+   对完整 greedy codec 记录首个分歧与 EOS；单独检查采样行为，不要求不同引擎同 seed 必然逐 token 一致。
+5. **完成速度验收**：在相同正确性配置下逐项启用优化，测预热后首音频延迟、RTF、
+   p50/p95、并发与显存。不能用冷启动、短截断用例或有其他 GPU 负载的单次数据宣称加速倍数。
+6. **再合并交付**：通过上述相关回归后合并原型、清理临时文件与分支，并更新能力矩阵。
+   暂未完成的代码应明确保留为开发状态，不为了清理分支而合进 main。
 
-正式计算路径使用 vLLM `FLASH_ATTN` backend；SDPA 替换只作为历史诊断对照，
-不用于速度验收。以下工具始终保留 vLLM attention，比较同一首步 prefill 的
-RMSNorm、Q/K/V 投影、Q/K norm、attention 输出、MLP 和逐层残差输出：
+## 进一步阅读
 
-```bash
-CUDA_VISIBLE_DEVICES=6 $TTS_PYTHON -m lm_tts_tools.layer_audit \
-  --model "$MODEL1" --backbone artifacts/backbone-56384 \
-  --reference-run results/56384-greedy --vllm-python "$VLLM_PYTHON" \
-  --output results/56384-layer-audit
-```
+- [5×10 布局与验证](docs/interleaved.md)
+- [原生 pipeline 接入边界](docs/native-pipeline.md)
+- [精度和速度验收要求](docs/performance.md)
+- [数值对齐与历史复现命令](docs/alignment-tools.md)
+- [历史验证记录](docs/validation.md)
 
-第一层保存所有 token，之后保存最后一个 token；`report.json` 给出首个不同的
-操作和各处误差，两个 `*-layers.pt` 保留对照张量。诊断 hook 只在该工具发起
-的单次 prefill 期间安装，不进入正常推理路径，也不用于测量速度。
-
-## 隔离对齐工具的原生 code predictor
-
-`--code-predictor-engine vllm-eager` / `vllm-graph` 使用插件内的 code predictor，
-在 vLLM 环境执行；它调用 vLLM FlashAttention 2，使用 BF16 与帧内增量 KV cache，
-不调用 SDPA、不依赖 Transformers。`vllm-graph` 把全部 15 个残差码本步骤捕获为
-一个 CUDA graph。此隔离工具需指定 `--greedy` 或 `--code-predictor-greedy`；
-原生 Omni / Gradio 路径另外支持随机采样，
-工具会明确拒绝不支持的组合，不会悄悄回退到 PyTorch。
-
-目前仍是单请求对齐路径：Talker 与 code predictor 通过工具层调用，额外 IPC 尚未消除，
-也未接入原生 serving 调度；CUDA graph 加速的范围仅是 code predictor。其独立检查：
-
-```bash
-CUDA_VISIBLE_DEVICES=6 $TTS_PYTHON -m lm_tts_tools.code_predictor_audit reference \
-  --model "$MODEL1" --reference-run results/56384-greedy --frames 0 1 2 7 \
-  --output results/cp-reference.pt
-CUDA_VISIBLE_DEVICES=6 $VLLM_PYTHON -m lm_tts_tools.code_predictor_audit native \
-  --input results/cp-reference.pt --output results/cp-native.json
-```
-
-工具验证原 PyTorch logits/码本、原生 eager 与 graph 的逐元素一致性，以及帧间缓存重用。
-`--require-identical-codes` 可额外要求原 PyTorch 全部码本一致，否则报告后返回失败。
-独立的耗时是 CP 微基准，不等于端到端加速倍数。
+历史工具中的 pooling、逐帧 IPC 和 SDPA 替换只用于诊断，不能当作当前原生服务或最终性能方案。
