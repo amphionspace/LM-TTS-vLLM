@@ -49,6 +49,17 @@ class NativePayloadTests(unittest.TestCase):
         frames = torch.tensor([[0, 0], [1174, 9], [444, 8], [2150, 1]])
         self.assertTrue(torch.equal(reference_frames(frames, [1174, 444, 2150]), frames[1:3]))
 
+    def test_interleaved_text_slots_are_not_audio(self):
+        frames = torch.tensor([[1174, 9], [-1, -1], [444, 8], [3, 7]])
+        self.assertTrue(torch.equal(reference_frames(frames, [1174, 2148, 444, 3]), frames[[0, 2]]))
+        request = SimpleNamespace(output_token_ids=[], last_output_token_id=2148, is_finished=lambda: False)
+        dummy = {'codes': {'audio': frames[1:2]}, 'meta': {'codec_frame_valid': True}}
+        self.assertFalse(reference_stream_frame(dummy, request)['meta']['codec_frame_valid'])
+        request.last_output_token_id = 444
+        after_text = {'codes': {'audio': frames[2:3]}, 'meta': {'codec_frame_valid': False}}
+        self.assertTrue(reference_stream_frame(after_text, request)['meta']['codec_frame_valid'])
+        self.assertFalse(after_text['meta']['codec_frame_valid'])
+
 
 if __name__ == "__main__":
     unittest.main()

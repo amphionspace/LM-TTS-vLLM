@@ -3,6 +3,7 @@ import math
 
 from vllm_omni.entrypoints.openai.tts_adapters.qwen3_tts import Qwen3TTSAdapter
 from .audio import canonical_audio_string
+from .interleaved import request_layout, uses_training_layout
 
 CP_KEYS = ('subtalker_dosample', 'subtalker_temperature', 'subtalker_top_k', 'subtalker_top_p')
 
@@ -55,6 +56,15 @@ class LMTTSAdapter(Qwen3TTSAdapter):
 
     def apply_sampling_overrides(self, sampling_params_list, request, prompt=None, request_id=None):
         params = super().apply_sampling_overrides(sampling_params_list, request, prompt, request_id)
+        info = prompt.get('additional_information', {}) if isinstance(prompt, dict) else {}
+        config = self.ctx.server.engine_client.model_config.hf_config.talker_config
+        if uses_training_layout(config) and info:
+            info['max_new_tokens'] = [params[0].max_tokens]
+            self._load_text_tokenizer()
+            _, plan, _, _ = request_layout(info, config,
+                lambda text: self.ctx.server._tts_tokenizer.encode(text, add_special_tokens=False),
+                self._estimate_ref_code_len)
+            params[0].max_tokens = len(plan.slots)
         extra = request.extra_params or {}
         if extra.get('do_sample') is False:
             params[0].temperature = 0.0
@@ -68,6 +78,17 @@ class LMTTSAdapter(Qwen3TTSAdapter):
             for param in params:
                 param.output_kind = RequestOutputKind.FINAL_ONLY
         return params
+
+    def _estimate_prompt_len(self, tts_params):
+        config = self.ctx.server.engine_client.model_config.hf_config.talker_config
+        if not uses_training_layout(config):
+            return super()._estimate_prompt_len(tts_params)
+        self._load_text_tokenizer()
+        length, _, _, refs = request_layout(tts_params, config,
+            lambda text: self.ctx.server._tts_tokenizer.encode(text, add_special_tokens=False),
+            self._estimate_ref_code_len)
+        tts_params['ref_code_length'] = [refs]
+        return length
 
     def validate_generation(self, tts_params, *, stage0_finish_reason, output_tokens):
         # Original Qwen's generate returns the available frames at an explicit

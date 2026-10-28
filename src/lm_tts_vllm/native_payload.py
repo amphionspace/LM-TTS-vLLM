@@ -31,7 +31,7 @@ def reference_frames(audio, output_token_ids):
     # The PyTorch baseline returns the residual frames preceding the final
     # sampled token. MRv2 eager MTP also computes that final frame at a cap.
     # Keep the prefix, not the tail: cropping the tail drops the first frame.
-    count = max(len(output_token_ids) - 1, 0)
+    count = sum(0 <= token < 2048 for token in output_token_ids[:-1])
     return audio[:count]
 
 
@@ -63,6 +63,19 @@ def reference_stream_frame(output, request, is_finished=False):
     limit = getattr(getattr(request, "sampling_params", None), "max_tokens", None)
     count = getattr(request, "output_token_count", len(ids))
     capped = limit is not None and count >= limit and not getattr(request, "resumable", False)
+    # Native MTP considers an input codec-pad invalid, including the first
+    # real frame after an interleaved text chunk. The plugin marks text slots
+    # with negative codec rows; recover real rows by matching this sample.
+    if isinstance(output, dict):
+        codes = (output.get('codes') or {}).get('audio')
+        if isinstance(codes, torch.Tensor) and codes.numel() and last is not None:
+            frame = codes.reshape(-1, codes.shape[-1])[-1]
+            if bool(((frame >= 0) & (frame < 2048)).all()) and int(frame[0]) == last:
+                output = dict(output)
+                output['meta'] = dict(output.get('meta') or {}, codec_frame_valid=True)
+            elif bool((frame < 0).any()):
+                output = dict(output)
+                output['meta'] = dict(output.get('meta') or {}, codec_frame_valid=False)
     if isinstance(output, dict) and (finished or capped) and last is not None and last != 2150:
         output = dict(output)
         output["meta"] = dict(output.get("meta") or {}, codec_frame_valid=False)
