@@ -16,6 +16,8 @@ def main():
     sys.path.insert(0, str(Path(__file__).resolve().parents[3] / 'LM-TTS-Training'))
     import torch
     from lm_tts.inference.codec import CodecSynthesizer, extract_speaker_embedding
+    from lm_tts.inference.frame import next_frame
+    from transformers import DynamicCache
     synth = CodecSynthesizer(args.model, 'cuda:0', torch.bfloat16, 'sdpa')
     with torch.inference_mode():
         codes = synth.codec.encode(str(args.ref_audio)).audio_codes[0].to('cuda')
@@ -32,8 +34,13 @@ def main():
         embeds, _ = synth.model.input_embeddings(batch)
         hidden = synth.model.talker.model(**embeds, use_cache=False).last_hidden_state[:, -1]
         logits = synth.model.talker.codec_head(hidden).float()
+        batch['history'] = codes.new_empty((0,))
+        first_codes, _ = next_frame(synth.model, batch, suppress_eos=True,
+            generation={'do_sample': False, 'subtalker_dosample': False, 'repetition_penalty': 1.05},
+            cache=DynamicCache())
         args.output.mkdir(parents=True, exist_ok=False)
-        torch.save({'prefill': embeds['inputs_embeds'][0].cpu(), 'hidden': hidden.cpu(), 'logits': logits.cpu()},
+        torch.save({'prefill': embeds['inputs_embeds'][0].cpu(), 'hidden': hidden.cpu(),
+                    'logits': logits.cpu(), 'first_codes': first_codes.cpu()},
                    args.output / 'reference.pt')
         info = {'text': [args.text], 'ref_text': [args.ref_text], 'language': ['Chinese'],
                 'task_type': ['Base'], 'non_streaming_mode': [False], 'max_new_tokens': [80],

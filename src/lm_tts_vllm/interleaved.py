@@ -122,10 +122,20 @@ class TrainingPromptBuilder:
             raise ValueError('Reference codec length disagrees with request')
         model = self.owner
         device = full.device
+        input_stream = bool(first(info.get('lm_tts_input_stream'), False))
+        if input_stream:
+            from .input_stream import chunk_plan
+            ids = list(info['lm_tts_chunk_text_ids'])
+            final = bool(first(info.get('lm_tts_chunk_final'), False))
+            plan = chunk_plan(int(first(info['lm_tts_chunk_frames'])), final)
+            # The caller supplies committed text IDs; EOS arrives only when
+            # the client explicitly closes input.
+            raw_ids = [model.config.tts_bos_token_id] + ids
+        else:
+            raw_ids = [model.config.tts_bos_token_id] + ids + [model.config.tts_eos_token_id]
         # Keep BOS in the projection batch, as the training frontend does.
         # Projecting it separately changes BF16 GEMM rounding for some rows.
-        ids = torch.tensor([model.config.tts_bos_token_id] + ids + [model.config.tts_eos_token_id],
-                           device=device, dtype=torch.long)
+        ids = torch.tensor(raw_ids, device=device, dtype=torch.long)
         projected = model.text_projection(model.text_embedding(ids))
         text = projected[1:]
         codec_pad = model.embed_input_ids(torch.tensor([model.talker_config.codec_pad_id], device=device))
@@ -138,8 +148,13 @@ class TrainingPromptBuilder:
             for group in range(1, codes.shape[1]):
                 frames = frames + model._stacked_codec_embed[group - 1, codes[:, group]]
             frames = frames + pad
-        streaming = not first(info.get('non_streaming_mode'), False)
-        prefix_length = length - plan.prefill_text - refs - (0 if streaming else 1)
+        streaming = input_stream or not first(info.get('non_streaming_mode'), False)
+        if input_stream:
+            prefix_length = 8 if first(info.get('language'), 'Auto').lower() == 'auto' else 9
+            segments, placed = layout(len(text), refs, *model.talker_config.lm_tts_streaming_chunk)
+            length = prefix_length + placed + refs
+        else:
+            prefix_length = length - plan.prefill_text - refs - (0 if streaming else 1)
         pieces = [full[:prefix_length-1], projected[:1] + codec_pad]
         if streaming:
             segments, _ = layout(len(text), refs, *model.talker_config.lm_tts_streaming_chunk)
@@ -155,7 +170,8 @@ class TrainingPromptBuilder:
             raise ValueError(f'Expected {length} prompt positions, received {declared}')
         # Audio slots add tts_pad. Forced text slots add their projected text
         # to the codec-pad embedding returned by MTP, with one BF16 addition.
-        tail = torch.cat([pad if slot < 0 else text[slot:slot+1] for slot in plan.slots])
+        tail = pad.expand(len(plan.slots), -1).clone() if input_stream else torch.cat(
+            [pad if slot < 0 else text[slot:slot+1] for slot in plan.slots])
         model._training_plans[str(info_dict['req_id'])] = plan
         while len(model._training_plans) > 4096:
             model._training_plans.pop(next(iter(model._training_plans)))

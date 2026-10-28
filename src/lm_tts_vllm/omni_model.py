@@ -15,7 +15,7 @@ from .precision import apply_bf16
 from .code_predictor import CodePredictor
 from .native_payload import normalize_voice_prompt
 from .audio import canonical_audio_string
-from .interleaved import TrainingPromptBuilder, uses_training_layout
+from .interleaved import TrainingPromptBuilder, uses_training_layout, first
 
 
 class LMTTSForConditionalGeneration(Qwen3TTSTalkerForConditionalGeneration):
@@ -107,12 +107,43 @@ class LMTTSForConditionalGeneration(Qwen3TTSTalkerForConditionalGeneration):
 
     def preprocess(self, input_ids, input_embeds, **info):
         self._validate_prompt(info)
+        if first(info.get('lm_tts_input_stream'), False) and int(first(info.get('lm_tts_chunk_index'), 0)) > 0:
+            if info.get('_omni_is_prefill', input_ids.numel() > 1):
+                return self._stream_text_prefill(input_ids, info)
         return super().preprocess(input_ids, input_embeds, **info)
+
+    def _stream_text_prefill(self, input_ids, info):
+        from .input_stream import chunk_plan
+        ids = torch.tensor(info['lm_tts_chunk_text_ids'], device=input_ids.device, dtype=torch.long)
+        projected = self.text_projection(self.text_embedding(ids))
+        pad_ids = torch.full_like(ids, self.talker_config.codec_pad_id)
+        embeddings = projected + self.embed_input_ids(pad_ids)
+        start = int(info['_omni_prompt_len']) - len(ids)
+        offset = int(info.get('_omni_num_computed_tokens', start)) - start
+        if offset < 0 or offset + len(input_ids) > len(ids):
+            raise ValueError('Streaming text continuation does not match retained KV positions')
+        plan = chunk_plan(int(first(info['lm_tts_chunk_frames'])), bool(first(info['lm_tts_chunk_final'])))
+        self._training_plans[str(info['req_id'])] = plan
+        return input_ids.fill_(self.talker_config.codec_pad_id), embeddings[offset:offset+len(input_ids)], {
+            'hidden_states': {'trailing_text': self._tts_pad_embed.new_empty((0, self._tts_pad_embed.shape[-1]))},
+            'meta': {'talker_text_offset': 0, 'codec_streaming': True,
+                     'codec_frame_valid': self._false_scalar(input_ids.device)},
+            'codes': {'audio': self._zero_codes(len(input_ids), input_ids.device)}}
+
+    def preprocess_prefill_rows_mrv2(self, *, entries, input_ids, input_embeds):
+        results = super().preprocess_prefill_rows_mrv2(entries=entries, input_ids=input_ids, input_embeds=input_embeds)
+        for index, (_, _, info) in enumerate(entries):
+            if first(info.get('lm_tts_input_stream'), False):
+                results[index] = None
+        return results
 
     def preprocess_batch_mrv2(self, *, req_infos, device):
         for info in req_infos:
             self._validate_prompt(info)
-        return super().preprocess_batch_mrv2(req_infos=req_infos, device=device)
+        fresh = [info for info in req_infos if not (first(info.get('lm_tts_input_stream'), False)
+                 and int(first(info.get('lm_tts_chunk_index'), 0)) > 0)]
+        if fresh:
+            return super().preprocess_batch_mrv2(req_infos=fresh, device=device)
 
     def preprocess_batch(self, *, req_ids, model_intermediate_buffer, device):
         for req_id in req_ids:

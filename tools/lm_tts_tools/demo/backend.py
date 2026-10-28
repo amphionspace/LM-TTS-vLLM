@@ -63,6 +63,7 @@ def main():
             gc.collect()
             torch.cuda.empty_cache()
         raw = json.loads((MODELS[name]['source'] / 'config.json').read_text())
+        state['native_path'] = MODELS[name]['native']
         training = raw['talker_config'].get('lm_tts_streaming_layout') == 'interleaved'
         if args.mode == 'pytorch':
             if training:
@@ -82,7 +83,7 @@ def main():
             from transformers import AutoTokenizer
             load_omni_general_plugins()
             engine = AsyncOmni(model=str(MODELS[name]['native']), deploy_config=str(
-                Path(lm_tts_vllm.__file__).parent / 'native_streaming.yaml'), stage_overrides={
+                Path(lm_tts_vllm.__file__).parent / 'native_input_streaming.yaml'), stage_overrides={
                 '0': {'kv_cache_memory_bytes': 536870912},
                 '1': {'max_model_len': 65536, 'max_num_batched_tokens': 65536,
                       'default_sampling_params': {'max_tokens': 65536}}})
@@ -229,6 +230,8 @@ def main():
                 yield json.dumps({'type': 'error', 'detail': str(exc)}, ensure_ascii=False) + '\n'
         return StreamingResponse(events(), media_type='application/x-ndjson')
 
+    from .input_sessions import install_input_sessions
+    install_input_sessions(app, Request, mode=args.mode, load=load, state=state, lock=lock, outdir=outdir)
     load(args.warm_model)
     try:
         uvicorn.run(app, host='127.0.0.1', port=args.port, log_level='info')
