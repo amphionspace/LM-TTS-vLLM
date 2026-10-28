@@ -59,11 +59,11 @@ def main():
         with gr.Row():
             with gr.Column():
                 mode = gr.Radio([('PyTorch（原 demo）', 'pytorch'), ('vLLM（原生插件）', 'vllm')], value='pytorch', label='推理模式')
-                model = gr.Dropdown([('Emilia step-56384', '56384'), ('训练 checkpoint step-100', '100')], value='56384', label='模型')
+                model = gr.Dropdown([('Emilia step-56384', '56384'), ('Emilia step-10000（5×10 interleaved）', '10000')], value='56384', label='模型')
                 ref_audio = gr.Audio(value=REFERENCE, type='filepath', label='参考音频（最长 30 秒）')
                 ref_text = gr.Textbox(value='在此奉劝大家别乱打美白针。', label='参考音频文本', lines=2)
                 x_vector_only_mode = gr.Checkbox(value=False, label='仅克隆说话人音色（无需参考文本）')
-                non_streaming_mode = gr.Checkbox(value=True, label='一次性输入文本（关闭使用交错文本条件，不影响音频返回方式）')
+                non_streaming_mode = gr.Checkbox(value=True, label='一次性输入文本（关闭为 Qwen overlay，尚非训练的 5×10 streaming）')
                 text = gr.Textbox(value='你好，这是语音合成测试。', label='要合成的文本', lines=3)
                 language = gr.Dropdown(languages, value='Auto', label='语言')
                 preset = gr.Radio(list(PRESETS), value='评测默认采样', label='采样预设')
@@ -81,7 +81,7 @@ def main():
                 run = gr.Button('合成', variant='primary')
             with gr.Column():
                 audio = gr.Audio(label='合成结果')
-                info = gr.Markdown('首次加载及切换模型可能需要数分钟。step-100 是训练早期模型，可能很快结束。')
+                info = gr.Markdown('首次加载及切换模型可能需要数分钟。step-10000 的训练 5×10 streaming 协议正在接入，当前页面仍返回完整音频。')
         preset.change(lambda p: PRESETS[p], preset, [temperature, top_k, top_p, penalty, greedy_cp, cp_temperature, cp_top_k, cp_top_p])
         run.click(synthesize, [mode, model, ref_audio, ref_text, text, language, temperature, top_k, top_p, penalty,
                               greedy_cp, cp_temperature, cp_top_k, cp_top_p, seed, max_tokens,

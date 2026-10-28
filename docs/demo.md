@@ -1,12 +1,16 @@
 # 双模式 Gradio 试听
 
-页面：`http://10.119.16.21:7861`。原 `tts-demo` 服务已停，新的界面与服务代码
+启动后的页面：`http://10.119.16.21:7861`。原 `tts-demo` 服务已停，新的界面与服务代码
 全部位于本仓库 `tools/lm_tts_tools/demo/`。不进入纯插件 wheel。
 
 - PyTorch：原 demo 的 Qwen-TTS / BF16 SDPA；使用 `envs/lm-tts` 原基线环境。
 - vLLM：标准 Omni SDK 加载本插件，Talker 与 CP attention 均为 FA2；使用独立
   Omni 环境。CP greedy 保留 CUDA graph，CP sampling 暂用 eager FA2。
-- 支持 56384 / step-100、上传参考音频、语言、两个原 demo 预设、greedy 对齐预设，
+- 模型列表为 step-56384 / step-10000；step-10000 替换原 step-100。
+  新模型来源为 `UltraEval-Audio/init_model/emilia-v4-emilia2-cbinit-langid-interleaved5x10-step-00010000`，
+  原生模型视图为 `artifacts/native-10000`。5×10 interleaved 协议尚在接入，
+  原 step-100 的验证结果不能作为新模型的验证结果。
+- 支持上传参考音频、语言、两个原 demo 预设、greedy 对齐预设，
   以及 Talker / CP 独立 temperature、top-k、top-p、重复惩罚和种子。
 - 开发分支新增仅 speaker embedding 克隆（参考文本可空），以及
   `non_streaming_mode` 文本条件切换。关闭该选项不代表音频分块返回。
