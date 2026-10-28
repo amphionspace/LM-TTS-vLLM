@@ -1,5 +1,3 @@
-import importlib.util
-from pathlib import Path
 import unittest
 
 from lm_tts_vllm.interleaved import decode_plan, layout, request_layout
@@ -49,6 +47,14 @@ class InterleavedTest(unittest.TestCase):
         self.assertEqual(refs, 10)
         self.assertEqual(len(plan.slots), 35)
         self.assertEqual(len(ids), 43)
+
+    def test_cached_reference_text_is_used_when_request_field_is_empty(self):
+        info = {'text': ['target'], 'ref_text': [''], 'max_new_tokens': [8],
+                'voice_clone_prompt': [{'icl_mode': True, 'ref_text': 'reference',
+                                        'ref_code': [[1] * 16]}]}
+        _, _, ids, refs = request_layout(info, {}, lambda text: list(text))
+        self.assertEqual(ids, list('referencetarget'))
+        self.assertEqual(refs, 1)
 
 
 if __name__ == '__main__':

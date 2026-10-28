@@ -67,7 +67,7 @@ def request_layout(info, config, tokenize, estimate_ref_code_len=None):
     """Return exact placeholder length and decode plan without loading weights."""
     prompt = first(info.get('voice_clone_prompt'), {}) or {}
     icl = bool(first(prompt.get('icl_mode'), not first(info.get('x_vector_only_mode'), False)))
-    ref_text = first(info.get('ref_text'), first(prompt.get('ref_text'), '')) if icl else ''
+    ref_text = (first(info.get('ref_text'), '') or first(prompt.get('ref_text'), '')) if icl else ''
     text = first(info.get('text'), '')
     ids = tokenize(ref_text or '') + tokenize(text)
     streamed = len(ids) + 1  # includes tts_eos
@@ -83,6 +83,8 @@ def request_layout(info, config, tokenize, estimate_ref_code_len=None):
     streaming = not first(info.get('non_streaming_mode'), False)
     chunk = config_value(config, 'lm_tts_streaming_chunk', [5, 10])
     maximum = int(first(info.get('max_new_tokens'), 2048))
+    if maximum < 1:
+        raise ValueError('max_new_tokens must be positive')
     plan = decode_plan(streamed, refs, maximum, *chunk) if streaming else DecodePlan(
         (-1,) * maximum, (True,) * maximum, streamed)
     language = first(info.get('language'), 'Auto').lower()
