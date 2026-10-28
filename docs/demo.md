@@ -13,7 +13,8 @@
   原 step-100 的验证结果不能作为新模型的验证结果。
 - 支持上传参考音频、语言、两个原 demo 预设、greedy 对齐预设，
   以及 Talker / CP 独立 temperature、top-k、top-p、重复惩罚和种子。
-- 支持仅 speaker embedding 克隆（参考文本可空）和 `non_streaming_mode` 文本条件切换。
+- 页面统一使用参考音频＋参考文本；仅 speaker embedding 克隆保留在后端 API，页面不提供此选项。
+  支持 `non_streaming_mode` 文本条件切换。
   step-10000 关闭此选项使用训练的 5×10 布局；step-56384 使用 Qwen overlay。
 - vLLM 音频通过 streaming Audio 组件边生成边播放，结束后提供完整 WAV。
   PyTorch 基线目前整段返回。两种模式都显示首块返回时间（不含模型加载）。
