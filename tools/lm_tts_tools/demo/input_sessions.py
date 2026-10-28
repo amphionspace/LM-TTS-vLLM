@@ -23,8 +23,10 @@ def install_input_sessions(app, Request, *, mode, load, state, lock, outdir):
         final: bool = False
 
     def progress(session, status):
+        buffer = session.get('buffer')
         return {'type': 'input_progress', 'received_text': session['text'],
-                'submitted_chars': session['submitted_chars'], 'segments': session['segments'], 'status': status}
+                'submitted_chars': session['submitted_chars'], 'segments': session['segments'], 'status': status,
+                'need_tokens': buffer.needed() if buffer is not None else None}
 
     async def mark_submitted(session, chunk, tokenizer, target_ids):
         decoded = tokenizer.decode(target_ids[:chunk.submitted_target_tokens], skip_special_tokens=False)
@@ -60,6 +62,7 @@ def install_input_sessions(app, Request, *, mode, load, state, lock, outdir):
         refs = math.ceil(audio_info.frames * codec['input_sample_rate'] / audio_info.samplerate / codec['encode_downsample_rate'])
         buffer = TextStreamBuffer(tokenizer.encode(req.ref_text, add_special_tokens=False), refs,
                                   raw.tts_eos_token_id, req.max_tokens-1)
+        session['buffer'] = buffer
         base = {'task_type': ['Base'], 'ref_audio': [req.ref_audio], 'ref_text': [req.ref_text],
                 'language': [req.language], 'x_vector_only_mode': [False], 'non_streaming_mode': [False],
                 'full_utterance_decode': [False], 'ref_code_length': [refs], 'max_new_tokens': [req.max_tokens],
@@ -115,6 +118,7 @@ def install_input_sessions(app, Request, *, mode, load, state, lock, outdir):
         refs = len(codes)
         buffer = TextStreamBuffer(tokenizer.encode(req.ref_text, add_special_tokens=False), refs,
                                   engine.raw['tts_eos_token_id'], req.max_tokens-1)
+        session['buffer'] = buffer
         cache = DynamicCache()
         text_ids = [engine.raw['tts_bos_token_id']]
         language = -1 if req.language.lower() == 'auto' else engine.raw['talker_config']['codec_language_id'][req.language.lower()]

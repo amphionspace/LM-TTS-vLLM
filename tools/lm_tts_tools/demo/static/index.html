@@ -1,0 +1,454 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LM-TTS 试听</title>
+<style>
+:root {
+  --bg: #f6f7f9; --card: #ffffff; --text: #16181d; --muted: #6b7280; --line: #e3e6eb;
+  --accent: #0f766e; --accent-soft: #ccfbf1; --accent-text: #ffffff; --danger: #b42318;
+  --field: #ffffff; --shadow: 0 1px 2px rgba(16, 24, 40, .04);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f1115; --card: #171a21; --text: #e7e9ee; --muted: #9aa1ad; --line: #2a2f39;
+    --accent: #2dd4bf; --accent-soft: #134e4a; --accent-text: #04201d; --danger: #f97066;
+    --field: #11141a; --shadow: none;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text);
+  font: 14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
+main { max-width: 1120px; margin: 0 auto; padding: 28px 16px 48px; }
+header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
+h1 { font-size: 22px; margin: 0; letter-spacing: .2px; }
+.health { display: flex; gap: 14px; color: var(--muted); font-size: 13px; }
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--line); margin-right: 6px; }
+.dot.ok { background: #16a34a; } .dot.busy { background: #d97706; }
+.grid { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+@media (max-width: 860px) { .grid { grid-template-columns: 1fr; } }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; box-shadow: var(--shadow); }
+.stack { display: flex; flex-direction: column; gap: 16px; }
+.sticky { position: sticky; top: 16px; }
+h2 { font-size: 13px; font-weight: 600; color: var(--muted); margin: 0 0 12px; text-transform: none; letter-spacing: .3px; }
+label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+.row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.row3 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+@media (max-width: 560px) { .row, .row3 { grid-template-columns: 1fr 1fr; } }
+select, textarea, input[type=number], input[type=text] {
+  width: 100%; background: var(--field); color: var(--text); border: 1px solid var(--line);
+  border-radius: 8px; padding: 8px 10px; font: inherit; }
+textarea { resize: vertical; min-height: 64px; }
+select:focus, textarea:focus, input:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-color: transparent; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 9px; padding: 3px; background: var(--field); width: 100%; }
+.seg button { flex: 1; border: 0; background: transparent; color: var(--muted); padding: 7px 10px; border-radius: 6px; font: inherit; cursor: pointer; }
+.seg button.on { background: var(--accent); color: var(--accent-text); font-weight: 600; }
+.field { margin-bottom: 12px; } .field:last-child { margin-bottom: 0; }
+.btn { border: 1px solid var(--line); background: var(--field); color: var(--text); border-radius: 8px;
+  padding: 8px 16px; font: inherit; cursor: pointer; }
+.btn:hover { border-color: var(--muted); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
+.btn.danger { color: var(--danger); }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+.actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.ref { display: flex; gap: 10px; align-items: center; }
+.ref audio { flex: 1; min-width: 0; height: 36px; }
+.tabs { display: flex; gap: 18px; border-bottom: 1px solid var(--line); margin: -4px 0 14px; }
+.tabs button { border: 0; background: none; color: var(--muted); font: inherit; padding: 6px 0 10px; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.tabs button.on { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
+.hint { color: var(--muted); font-size: 13px; margin: 0 0 10px; }
+.progress { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; min-height: 56px;
+  white-space: pre-wrap; line-height: 1.9; background: var(--field); margin-top: 12px; }
+.progress .sent { background: var(--accent-soft); border-radius: 3px; }
+.progress .wait { color: var(--muted); }
+.meta { font-size: 12px; color: var(--muted); margin-top: 6px; }
+details summary { cursor: pointer; color: var(--muted); font-size: 13px; list-style: none; }
+details summary::before { content: "▸ "; } details[open] summary::before { content: "▾ "; }
+details > div { margin-top: 12px; }
+.stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.stat { border: 1px solid var(--line); border-radius: 10px; padding: 10px; }
+.stat .k { font-size: 12px; color: var(--muted); }
+.stat .v { font-size: 19px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.status { display: flex; align-items: center; gap: 8px; margin: 2px 0 14px; font-size: 13px; color: var(--muted); }
+.status.err { color: var(--danger); }
+.bar { height: 4px; background: var(--line); border-radius: 2px; overflow: hidden; margin: 12px 0 4px; }
+.bar > div { height: 100%; width: 0; background: var(--accent); transition: width .2s linear; }
+.final { margin-top: 14px; }
+.final a { text-decoration: none; }
+.final a[aria-disabled=true] { opacity: .45; pointer-events: none; }
+.hidden { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>LM-TTS 声音克隆</h1>
+    <div class="health"><span><i class="dot" id="h-vllm"></i>vLLM</span><span><i class="dot" id="h-pytorch"></i>PyTorch</span></div>
+  </header>
+  <div class="grid">
+    <div class="stack">
+      <section class="card">
+        <h2>设置</h2>
+        <div class="field">
+          <label>推理引擎</label>
+          <div class="seg" id="engine"><button data-v="vllm" class="on">vLLM</button><button data-v="pytorch">PyTorch</button></div>
+        </div>
+        <div class="row">
+          <div><label for="model">模型</label>
+            <select id="model"><option value="10000">step-10000（5×10，支持流式）</option><option value="56384">step-56384</option></select></div>
+          <div><label for="language">语言</label><select id="language"></select></div>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>参考声音</h2>
+        <div class="field ref">
+          <audio id="ref-player" controls preload="none"></audio>
+          <button class="btn" id="ref-pick">更换</button>
+          <input type="file" id="ref-file" accept="audio/*" class="hidden">
+        </div>
+        <div class="field"><label for="ref-text">参考音频文本</label><textarea id="ref-text" rows="2"></textarea></div>
+      </section>
+
+      <section class="card">
+        <div class="tabs" id="tabs"><button data-v="stream" class="on">流式输入</button><button data-v="full">整段合成</button></div>
+        <div id="pane-full" class="hidden">
+          <textarea id="full-text" rows="4">你好，这是一段语音合成测试。今天天气很好，我们一起去公园散散步吧。</textarea>
+          <div class="actions"><button class="btn primary" id="run">合成</button></div>
+        </div>
+        <div id="pane-stream">
+          <p class="hint" id="stream-hint">逐段发送文本，模型收到足够的文本后开始出声；全部发完点"结束输入"。按 Enter 发送。</p>
+          <input type="text" id="delta" placeholder="输入下一段文本…">
+          <div class="actions">
+            <button class="btn primary" id="send">发送</button>
+            <button class="btn" id="finish">结束输入</button>
+            <button class="btn danger" id="cancel">取消</button>
+          </div>
+          <div class="progress" id="progress"><span class="wait">发送的文本会显示在这里，高亮部分已送入模型。</span></div>
+          <div class="meta" id="progress-meta"></div>
+          <details style="margin-top:14px">
+            <summary>自动模拟分段输入</summary>
+            <div>
+              <textarea id="sim-text" rows="3">你好，这是一段流式语音合成测试。文本会分成几段逐步发送，模型收到前面的内容后就开始生成声音。在播放第一段声音的时候，后面的文字还没有全部发送完成。</textarea>
+              <div class="row" style="margin-top:10px">
+                <div><label for="sim-chars">每次字数</label><input type="number" id="sim-chars" value="8" min="1" max="50"></div>
+                <div><label for="sim-interval">间隔（秒）</label><input type="number" id="sim-interval" value="0.6" min="0.1" max="5" step="0.1"></div>
+              </div>
+              <div class="actions"><button class="btn" id="simulate">开始模拟</button></div>
+            </div>
+          </details>
+        </div>
+      </section>
+
+      <section class="card">
+        <details>
+          <summary>高级设置</summary>
+          <div>
+            <div class="field"><label for="preset">采样预设</label>
+              <select id="preset"><option value="standard">标准采样</option><option value="low">低温采样</option><option value="greedy">Greedy</option></select></div>
+            <div class="row3 field">
+              <div><label>temperature</label><input type="number" id="temperature" step="0.05" min="0" max="2"></div>
+              <div><label>top-k</label><input type="number" id="top_k" step="1" min="0"></div>
+              <div><label>top-p</label><input type="number" id="top_p" step="0.05" min="0.05" max="1"></div>
+              <div><label>重复惩罚</label><input type="number" id="penalty" step="0.05" min="1" max="3"></div>
+            </div>
+            <div class="row3 field">
+              <div><label>残差 temperature</label><input type="number" id="cp_temperature" step="0.05" min="0.05" max="2"></div>
+              <div><label>残差 top-k</label><input type="number" id="cp_top_k" step="1" min="0"></div>
+              <div><label>残差 top-p</label><input type="number" id="cp_top_p" step="0.05" min="0.05" max="1"></div>
+              <div><label>残差 greedy</label><select id="greedy_cp"><option value="0">否</option><option value="1">是</option></select></div>
+            </div>
+            <div class="row">
+              <div><label>随机种子</label><input type="number" id="seed" value="42" min="0"></div>
+              <div><label>最大帧数（12.5 帧/秒）</label><input type="number" id="max_tokens" value="512" min="3" max="2048"></div>
+            </div>
+          </div>
+        </details>
+      </section>
+    </div>
+
+    <section class="card sticky">
+      <h2>输出</h2>
+      <div class="status" id="status">就绪</div>
+      <div class="stats">
+        <div class="stat"><div class="k">首块延迟</div><div class="v" id="s-first">—</div></div>
+        <div class="stat"><div class="k">音频时长</div><div class="v" id="s-audio">—</div></div>
+        <div class="stat"><div class="k">合成耗时</div><div class="v" id="s-total">—</div></div>
+        <div class="stat"><div class="k">音频块</div><div class="v" id="s-chunks">—</div></div>
+      </div>
+      <div class="bar"><div id="play-bar"></div></div>
+      <div class="meta" id="play-meta">实时播放：未开始</div>
+      <div class="ref final" id="final">
+        <audio id="final-audio" controls preload="none"></audio>
+        <a class="btn" id="final-link" download aria-disabled="true">下载</a>
+      </div>
+    </section>
+  </div>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const PRESETS = {
+  standard: [0.9, 50, 1.0, 1.05, 0, 0.9, 50, 1.0],
+  low: [0.3, 10, 1.0, 2.0, 1, 0.9, 50, 1.0],
+  greedy: [0.0, 50, 1.0, 1.05, 1, 0.9, 50, 1.0],
+};
+const PARAMS = ['temperature', 'top_k', 'top_p', 'penalty', 'greedy_cp', 'cp_temperature', 'cp_top_k', 'cp_top_p'];
+const state = { engine: 'vllm', tab: 'stream', refPath: null, session: null, busy: false, simulating: false };
+
+function applyPreset() { PRESETS[$('preset').value].forEach((v, i) => $(PARAMS[i]).value = v); }
+function segmented(el, key, onChange) {
+  el.addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return;
+    [...el.children].forEach(c => c.classList.toggle('on', c === b));
+    state[key] = b.dataset.v; onChange && onChange();
+  });
+}
+function setStatus(text, error = false) { $('status').textContent = text; $('status').classList.toggle('err', error); }
+function setStats(first, audio, total, chunks) {
+  $('s-first').textContent = first ?? '—'; $('s-audio').textContent = audio ?? '—';
+  $('s-total').textContent = total ?? '—'; $('s-chunks').textContent = chunks ?? '—';
+}
+function fmt(s) { return s == null ? '—' : s.toFixed(2) + 's'; }
+const audioUrl = path => '/api/audio?path=' + encodeURIComponent(path);
+
+function payload(extra) {
+  if (!state.refPath || !$('ref-text').value.trim()) throw new Error('请提供参考音频和对应文本');
+  const num = id => Number($(id).value);
+  return Object.assign({
+    model: $('model').value, language: $('language').value, ref_audio: state.refPath, ref_text: $('ref-text').value.trim(),
+    text: '', x_vector_only_mode: false, temperature: num('temperature'), top_k: num('top_k'), top_p: num('top_p'),
+    penalty: num('penalty'), greedy_cp: $('greedy_cp').value === '1', cp_temperature: num('cp_temperature'),
+    cp_top_k: num('cp_top_k'), cp_top_p: num('cp_top_p'), seed: num('seed'), max_tokens: num('max_tokens'),
+  }, extra);
+}
+
+async function api(path, body, method) {
+  const res = await fetch(path, { method: method || (body ? 'POST' : 'GET'),
+    headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+  if (!res.ok) {
+    let detail = res.statusText;
+    try { detail = (await res.json()).detail || detail; } catch (_) {}
+    throw new Error(detail);
+  }
+  return res;
+}
+
+async function* events(res) {
+  const reader = res.body.getReader(), decoder = new TextDecoder();
+  let buf = '';
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    let i;
+    while ((i = buf.indexOf('\n')) >= 0) {
+      const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1);
+      if (line) yield JSON.parse(line);
+    }
+  }
+}
+
+// Gapless playback: each decoded chunk starts exactly when the previous one ends.
+const player = {
+  ctx: null, next: 0, total: 0, started: 0, timer: null,
+  reset() {
+    if (this.ctx) this.ctx.close();
+    this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+    this.next = 0; this.total = 0; this.started = 0;
+    clearInterval(this.timer); this.timer = setInterval(() => this.tick(), 200); this.tick();
+  },
+  async push(path) {
+    const ctx = this.ctx;
+    const data = await (await fetch(audioUrl(path))).arrayBuffer();
+    if (!ctx || ctx !== this.ctx || ctx.state === 'closed') return;
+    const buffer = await ctx.decodeAudioData(data);
+    const src = this.ctx.createBufferSource();
+    src.buffer = buffer; src.connect(this.ctx.destination);
+    const now = this.ctx.currentTime;
+    if (this.next < now + 0.05) this.next = now + 0.05;
+    if (!this.started) this.started = this.next;
+    src.start(this.next); this.next += buffer.duration; this.total += buffer.duration;
+  },
+  tick() {
+    if (!this.ctx || !this.total) { $('play-bar').style.width = '0'; $('play-meta').textContent = '实时播放：未开始'; return; }
+    const played = Math.max(0, Math.min(this.total, this.ctx.currentTime - this.started));
+    const buffered = this.total - played;
+    $('play-bar').style.width = (100 * played / this.total) + '%';
+    $('play-meta').textContent = `实时播放：${played.toFixed(1)} / ${this.total.toFixed(1)} 秒` +
+      (buffered < 0.05 && state.busy ? ' · 等待下一块' : '');
+  },
+};
+
+function beginRun(label) {
+  state.busy = true; updateButtons();
+  player.reset(); setStats(); setStatus(label);
+  $('final-audio').removeAttribute('src'); $('final-audio').load(); $('final-link').setAttribute('aria-disabled', 'true');
+}
+function endRun() { state.busy = false; updateButtons(); }
+
+async function consume(res, engineName) {
+  let chunks = 0, first = null;
+  for await (const ev of events(res)) {
+    if (ev.type === 'error') throw new Error(ev.detail);
+    if (ev.type === 'input_progress') renderProgress(ev);
+    if (ev.type === 'chunk') {
+      chunks = ev.index + 1; first = first ?? ev.elapsed_seconds;
+      setStats(fmt(first), fmt(player.total), fmt(ev.elapsed_seconds), chunks);
+      setStatus(`${engineName} 正在生成…`);
+      player.push(ev.audio).then(() => $('s-audio').textContent = fmt(player.total));
+    }
+    if (ev.type === 'result') {
+      setStats(fmt(ev.first_audio_seconds), fmt(ev.audio_seconds), fmt(ev.seconds), ev.chunks);
+      setStatus(`${engineName} 生成完成`);
+      $('final-audio').src = audioUrl(ev.audio); $('final-link').href = audioUrl(ev.audio);
+      $('final-link').removeAttribute('aria-disabled');
+      if ('received_text' in ev) renderProgress(Object.assign({}, ev, { status: '已完成' }));
+    }
+  }
+}
+
+function renderProgress(ev) {
+  const text = ev.received_text || '', at = Math.max(0, Math.min(text.length, ev.submitted_chars || 0));
+  const el = $('progress'); el.textContent = '';
+  if (!text) { el.innerHTML = '<span class="wait">发送的文本会显示在这里，高亮部分已送入模型。</span>'; }
+  else {
+    const a = document.createElement('span'); a.className = 'sent'; a.textContent = text.slice(0, at);
+    const b = document.createElement('span'); b.className = 'wait'; b.textContent = text.slice(at);
+    el.append(a, b);
+  }
+  let status = ev.status || '';
+  if (ev.need_tokens > 0 && !ev.segments) status = `等待更多文本：还差约 ${ev.need_tokens} 个 token 开始生成（或点"结束输入"）`;
+  else if (ev.need_tokens > 0) status = `等待下一段：还差 ${ev.need_tokens} 个 token`;
+  $('progress-meta').textContent = `${status} · 已送入模型 ${at} / 已接收 ${text.length} 字`;
+}
+
+const engineName = () => state.engine === 'vllm' ? 'vLLM' : 'PyTorch';
+
+async function runFull() {
+  const text = $('full-text').value.trim();
+  if (!text) return setStatus('请输入要合成的文本', true);
+  try {
+    const body = payload({ text, non_streaming_mode: true });
+    beginRun('正在合成；首次加载或切换模型可能需要几分钟');
+    await consume(await api(`/api/${state.engine}/synthesize_stream`, body), engineName());
+  } catch (e) { setStatus(e.message, true); } finally { endRun(); }
+}
+
+async function openSession() {
+  const engine = state.engine, name = engineName();
+  const { session_id } = await (await api(`/api/${engine}/input_sessions`, payload({ non_streaming_mode: false }))).json();
+  const session = { id: session_id, engine };
+  state.session = session;
+  beginRun('等待文本…');
+  renderProgress({ status: '等待文本' });
+  (async () => {
+    try { await consume(await api(`/api/${engine}/input_sessions/${session_id}/events`), name); }
+    catch (e) { setStatus(e.message, true); }
+    finally { if (state.session === session) state.session = null; endRun(); }
+  })();
+  return session;
+}
+
+async function sendText(text, final) {
+  let session = state.session;
+  if (!session) {
+    if (!text) throw new Error('请先输入一段文本');
+    session = await openSession();
+  }
+  const ev = await (await api(`/api/${session.engine}/input_sessions/${session.id}/text`, { text, final })).json();
+  renderProgress(ev);
+}
+
+async function onSend(final) {
+  const text = $('delta').value;
+  if (!final && !text.trim()) return;
+  try { await sendText(text, final); $('delta').value = ''; $('delta').focus(); }
+  catch (e) { setStatus(e.message, true); }
+}
+
+async function cancel() {
+  state.simulating = false;
+  const s = state.session; state.session = null;
+  if (s) { try { await api(`/api/${s.engine}/input_sessions/${s.id}`, null, 'DELETE'); } catch (_) {} }
+  if (player.ctx) player.ctx.close(), player.ctx = null;
+  setStatus('已取消'); endRun();
+}
+
+async function simulate() {
+  const text = $('sim-text').value.trim(), step = Math.max(1, Number($('sim-chars').value) || 8);
+  const wait = Math.max(0.1, Number($('sim-interval').value) || 0.6) * 1000;
+  if (!text) return;
+  state.simulating = true; updateButtons();
+  try {
+    for (let i = 0; i < text.length && state.simulating; i += step) {
+      await sendText(text.slice(i, i + step), false);
+      await new Promise(r => setTimeout(r, wait));
+    }
+    if (state.simulating) await sendText('', true);
+  } catch (e) { setStatus(e.message, true); }
+  finally { state.simulating = false; updateButtons(); }
+}
+
+function updateButtons() {
+  const streamOk = $('model').value === '10000';
+  $('run').disabled = state.busy;
+  $('send').disabled = !streamOk || state.simulating || (state.busy && !state.session);
+  $('finish').disabled = !state.session || state.simulating;
+  $('cancel').disabled = !state.session && !state.simulating;
+  $('simulate').disabled = !streamOk || state.busy || state.simulating;
+  $('delta').disabled = !streamOk;
+  $('stream-hint').textContent = streamOk
+    ? '逐段发送文本，模型收到足够的文本后开始出声；全部发完点"结束输入"。按 Enter 发送。'
+    : 'step-56384 不支持流式输入，请使用"整段合成"。';
+  document.querySelectorAll('#engine button, #model, #language, #ref-pick').forEach(el => el.disabled = state.busy);
+}
+
+async function refreshHealth() {
+  try {
+    const h = await (await fetch('/api/health')).json();
+    for (const e of ['vllm', 'pytorch']) {
+      const dot = $('h-' + e); dot.className = 'dot ' + (h[e].ready ? 'ok' : 'busy');
+      dot.parentElement.title = h[e].ready ? `已加载 step-${h[e].model}` : '加载中或不可用';
+    }
+  } catch (_) {}
+}
+
+async function init() {
+  applyPreset();
+  const cfg = await (await fetch('/api/config')).json();
+  $('language').innerHTML = cfg.languages.map(l => `<option>${l}</option>`).join('');
+  state.refPath = cfg.reference.path; $('ref-text').value = cfg.reference.text;
+  $('ref-player').src = audioUrl(cfg.reference.path);
+  segmented($('engine'), 'engine');
+  segmented($('tabs'), 'tab', () => {
+    $('pane-full').classList.toggle('hidden', state.tab !== 'full');
+    $('pane-stream').classList.toggle('hidden', state.tab !== 'stream');
+  });
+  $('preset').onchange = applyPreset;
+  $('model').onchange = updateButtons;
+  $('run').onclick = runFull;
+  $('send').onclick = () => onSend(false);
+  $('finish').onclick = () => onSend(true);
+  $('delta').onkeydown = e => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); onSend(false); } };
+  $('cancel').onclick = cancel;
+  $('simulate').onclick = simulate;
+  $('ref-pick').onclick = () => $('ref-file').click();
+  $('ref-file').onchange = async () => {
+    const file = $('ref-file').files[0]; if (!file) return;
+    const form = new FormData(); form.append('file', file);
+    try {
+      const res = await fetch('/api/upload', { method: 'POST', body: form });
+      if (!res.ok) throw new Error((await res.json()).detail);
+      state.refPath = (await res.json()).path;
+      $('ref-player').src = URL.createObjectURL(file);
+      $('ref-text').value = ''; $('ref-text').focus();
+      setStatus('已更换参考音频，请填写对应文本');
+    } catch (e) { setStatus(e.message, true); }
+  };
+  updateButtons(); refreshHealth(); setInterval(refreshHealth, 5000);
+}
+init();
+</script>
+</body>
+</html>

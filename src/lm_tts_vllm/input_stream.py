@@ -40,6 +40,14 @@ class TextStreamBuffer:
             self.pending.append(self.eos_id)
             self.finished = True
 
+    def needed(self):
+        """Text tokens still missing before the next segment can be submitted."""
+        if self.finished or self.exhausted:
+            return 0
+        need = ((self.reference_frames // self.chunk_frames + 1) * self.chunk_text
+                if self.index == 0 else self.chunk_text)
+        return max(0, need - len(self.pending))
+
     def drain(self):
         while self.pending and not self.exhausted:
             need = ((self.reference_frames // self.chunk_frames + 1) * self.chunk_text
