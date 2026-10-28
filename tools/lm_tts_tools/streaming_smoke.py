@@ -20,14 +20,18 @@ def check_reference(model, directory):
     with torch.inference_mode():
         prefill, _, _, _ = model._prompt_builder.build_prompt_embeds(task_type='Base', info_dict=info)
     diff = (prefill.cpu().float() - reference['prefill'].float()).abs()
+    torch.save(prefill.cpu(), directory / 'native-prefill.pt')
+    (directory / 'native-first.pt').unlink(missing_ok=True)
     result = {'prefill_shape': list(prefill.shape), 'prefill_max_abs': float(diff.max()),
               'prefill_mismatch_elements': int((diff != 0).sum())}
     def capture(module, args, output):
         handle.remove()
-        hidden = output[-1:].detach()
-        logits = model.compute_logits(hidden).detach()
+        hidden = args[1][-1:].detach()
+        logits = output[-1:].detach()
         torch.save({'hidden': hidden.cpu(), 'logits': logits.cpu()}, directory / 'native-first.pt')
-    handle = model.model.register_forward_hook(capture)
+    # The compiled backbone bypasses Module hooks. LogitsProcessor retains
+    # normal Module dispatch and sees the actual sampled predictor hidden.
+    handle = model.logits_processor.register_forward_hook(capture)
     return result
 
 
@@ -118,6 +122,18 @@ async def run(args):
         sf.write(args.output / 'final.wav', complete_audio.numpy(), int(sr))
         report = {'chunks': chunks, 'final': final, 'total_samples': complete_audio.numel()}
         (args.output / 'report.json').write_text(json.dumps(report, indent=2) + '\n')
+        if args.reference:
+            reference = torch.load(args.reference / 'reference.pt', map_location='cpu', weights_only=True)
+            native = torch.load(args.reference / 'native-first.pt', map_location='cpu', weights_only=True)
+            parity = {}
+            for key in ('hidden', 'logits'):
+                a, b = reference[key].float(), native[key].float()
+                diff = (a - b).abs()
+                parity[key] = {'max_abs': float(diff.max()), 'mean_abs': float(diff.mean()),
+                    'cosine': float(torch.nn.functional.cosine_similarity(a.flatten()[None], b.flatten()[None]))}
+            parity['argmax'] = {name: int(value['logits'].argmax())
+                                for name, value in [('pytorch', reference), ('vllm', native)]}
+            (args.output / 'first-step-parity.json').write_text(json.dumps(parity, indent=2))
         assert final is not None, 'Missing final output'
         assert len(chunks) > 1, 'No real incremental audio delivery'
         assert complete_audio.numel() == 79 * 1920, 'Capped generation must retain 79 codec frames'

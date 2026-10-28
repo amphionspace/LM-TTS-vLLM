@@ -122,8 +122,12 @@ class TrainingPromptBuilder:
             raise ValueError('Reference codec length disagrees with request')
         model = self.owner
         device = full.device
-        ids = torch.tensor(ids + [model.config.tts_eos_token_id], device=device, dtype=torch.long)
-        text = model.text_projection(model.text_embedding(ids))
+        # Keep BOS in the projection batch, as the training frontend does.
+        # Projecting it separately changes BF16 GEMM rounding for some rows.
+        ids = torch.tensor([model.config.tts_bos_token_id] + ids + [model.config.tts_eos_token_id],
+                           device=device, dtype=torch.long)
+        projected = model.text_projection(model.text_embedding(ids))
+        text = projected[1:]
         codec_pad = model.embed_input_ids(torch.tensor([model.talker_config.codec_pad_id], device=device))
         text_rows = text + codec_pad
         pad = model._tts_pad_embed.reshape(1, -1)
@@ -136,9 +140,9 @@ class TrainingPromptBuilder:
             frames = frames + pad
         streaming = not first(info.get('non_streaming_mode'), False)
         prefix_length = length - plan.prefill_text - refs - (0 if streaming else 1)
-        pieces = [full[:prefix_length]]
+        pieces = [full[:prefix_length-1], projected[:1] + codec_pad]
         if streaming:
-            segments, _ = layout(len(ids), refs, *model.talker_config.lm_tts_streaming_chunk)
+            segments, _ = layout(len(text), refs, *model.talker_config.lm_tts_streaming_chunk)
             pieces.extend(text_rows[a:b] if kind == 'text' else frames[a:b] for kind, a, b in segments)
         else:
             bos = model.embed_input_ids(torch.tensor([model.talker_config.codec_bos_id], device=device))
