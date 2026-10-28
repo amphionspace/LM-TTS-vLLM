@@ -34,6 +34,12 @@ class NativePayloadTests(unittest.TestCase):
         self.assertFalse(reference_stream_frame(output, snapshot)["meta"]["codec_frame_valid"])
         snapshot.last_output_token_id = 2150
         self.assertIs(reference_stream_frame(output, snapshot), output)
+        pending_ack = SimpleNamespace(output_token_ids=[], last_output_token_id=444,
+            output_token_count=80, sampling_params=SimpleNamespace(max_tokens=80),
+            is_finished=lambda: False)
+        self.assertFalse(reference_stream_frame(output, pending_ack)["meta"]["codec_frame_valid"])
+        pending_ack.output_token_count = 79
+        self.assertIs(reference_stream_frame(output, pending_ack), output)
 
     def test_token_cap_keeps_first_frame_and_drops_final_eager_frame(self):
         frames = torch.tensor([[1174, 9], [444, 8], [3, 7]])

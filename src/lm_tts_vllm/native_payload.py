@@ -57,7 +57,13 @@ def reference_stream_frame(output, request, is_finished=False):
     # copies and expose just the latest token separately.
     last = ids[-1] if ids else getattr(request, "last_output_token_id", None)
     finished = is_finished or request.is_finished()
-    if isinstance(output, dict) and finished and last is not None and last != 2150:
+    # The native output worker publishes the capped token before the scheduler
+    # ACK marks the request finished. Waiting for that ACK is too late: the
+    # frame is already in the connector's history (or in a delivered chunk).
+    limit = getattr(getattr(request, "sampling_params", None), "max_tokens", None)
+    count = getattr(request, "output_token_count", len(ids))
+    capped = limit is not None and count >= limit and not getattr(request, "resumable", False)
+    if isinstance(output, dict) and (finished or capped) and last is not None and last != 2150:
         output = dict(output)
         output["meta"] = dict(output.get("meta") or {}, codec_frame_valid=False)
     return output
