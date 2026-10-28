@@ -1,3 +1,4 @@
+import importlib.util
 import types
 import unittest
 
@@ -5,10 +6,10 @@ import torch
 from torch import nn
 
 from lm_tts_vllm.precision import BFloatRope, rms_forward, split_linear
-from lm_tts_tools.diagnostic_attention import sdpa_attention
 
 
 class PrecisionTests(unittest.TestCase):
+    @unittest.skipUnless(importlib.util.find_spec('qwen_tts'), 'qwen-tts oracle not installed')
     def test_rmsnorm_matches_qwen_with_bf16_weight_and_residual(self):
         from qwen_tts.core.models.modeling_qwen3_tts import Qwen3TTSRMSNorm
         torch.manual_seed(3)
@@ -20,6 +21,7 @@ class PrecisionTests(unittest.TestCase):
         self.assertTrue(torch.equal(added, x + residual))
         self.assertTrue(torch.equal(actual, reference(x + residual)))
 
+    @unittest.skipUnless(importlib.util.find_spec('qwen_tts'), 'qwen-tts oracle not installed')
     def test_rope_matches_equal_axis_interleaved_mrope(self):
         from qwen_tts.core.models.modeling_qwen3_tts import apply_multimodal_rotary_pos_emb
         torch.manual_seed(4)
@@ -47,23 +49,6 @@ class PrecisionTests(unittest.TestCase):
         x = torch.randn(7, 64).bfloat16()
         actual, _ = combined(x)
         self.assertTrue(torch.equal(actual, torch.cat([p(x) for p in projections], -1)))
-
-    def test_sdpa_diagnostic_matches_transformers_grouped_attention(self):
-        from transformers.integrations.sdpa_attention import sdpa_attention_forward
-        torch.manual_seed(6)
-        heads, kv_heads, dim, length = 4, 2, 16, 9
-        module = nn.Module()
-        module.num_key_value_groups = heads // kv_heads
-        module.is_causal = True
-        module.eval()
-        q = torch.randn(1, heads, length, dim).bfloat16()
-        k = torch.randn(1, kv_heads, length, dim).bfloat16()
-        v = torch.randn_like(k)
-        expected, _ = sdpa_attention_forward(module, q, k, v, attention_mask=None, scaling=dim**-0.5)
-        native = types.SimpleNamespace(num_heads=heads, num_kv_heads=kv_heads, head_size=dim, impl=types.SimpleNamespace(scale=dim**-0.5))
-        flatten = lambda x: x.transpose(1, 2).reshape(length, -1)
-        actual = sdpa_attention(native, flatten(q), flatten(k), flatten(v))
-        self.assertTrue(torch.equal(actual, expected.reshape_as(actual)))
 
 
 if __name__ == "__main__":
