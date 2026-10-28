@@ -78,7 +78,9 @@ def main():
             import lm_tts_vllm
             from pathlib import Path
             from vllm_omni import AsyncOmni
+            from vllm_omni.plugins import load_omni_general_plugins
             from transformers import AutoTokenizer
+            load_omni_general_plugins()
             engine = AsyncOmni(model=str(MODELS[name]['native']), deploy_config=str(
                 Path(lm_tts_vllm.__file__).parent / 'native_streaming.yaml'), stage_overrides={
                 '0': {'kv_cache_memory_bytes': 536870912},
