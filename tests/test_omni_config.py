@@ -5,6 +5,19 @@ import unittest
 
 @unittest.skipUnless(importlib.util.find_spec("vllm_omni"), "optional Omni runtime not installed")
 class OmniConfigTests(unittest.TestCase):
+    def test_standard_vllm_hook_registers_native_pipeline_and_only_our_adapter(self):
+        from lm_tts_vllm import register
+        from lm_tts_vllm.omni import register as register_omni
+        from transformers import AutoConfig
+        from vllm_omni.config.pipeline_registry import resolve_pipeline_config
+        from vllm_omni.entrypoints.openai.tts_adapters import detect_tts_model_type
+        register()
+        register_omni()  # Both public discovery hooks may run in one process.
+        self.assertEqual(AutoConfig.for_model('lm_tts').model_type, 'lm_tts')
+        self.assertEqual(resolve_pipeline_config('lm_tts').model_arch, 'LMTTSForConditionalGeneration')
+        self.assertEqual(detect_tts_model_type('qwen3_tts', 'LMTTSForConditionalGeneration'), 'lm_tts')
+        self.assertEqual(detect_tts_model_type('qwen3_tts', 'Qwen3TTSTalkerForConditionalGeneration'), 'qwen3_tts')
+
     def test_nested_config_survives_transformers_roundtrip_and_stage_override(self):
         from lm_tts_vllm.omni import LMTTSConfig
         raw = {"model_type": "lm_tts", "talker_config": {

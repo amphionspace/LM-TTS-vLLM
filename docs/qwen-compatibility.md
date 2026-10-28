@@ -16,6 +16,7 @@
 | Base：仅说话人向量，不要求参考文本 | 两份指定 checkpoint 均已验证 |
 | non_streaming_mode=True / False 文本条件方式 | 两份模型的四种克隆组合已验证；不是音频传输方式 |
 | 批量 / 连续批处理 | max_num_seqs=2 混合四请求已验证；CP 暂逐请求执行，尚未向量化 |
+| 标准 CLI / HTTP | 自动插件加载及四种克隆组合通过；HTTP CP 采样与 seed 已验证 |
 | 缓存 voice_clone_prompt 输入 / 生成 | 原生导出及不携带参考音频的四种组合复用已验证 |
 | 文件、URL、base64、(waveform, sr) 输入 | 六种格式的解码波形一致；路径、file URI、data URI、waveform 已端到端验证 |
 | 真正音频分块返回 | AsyncOmni 分块与长度截断通过：10 + 25 + 25 + 19 帧 |

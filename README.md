@@ -25,8 +25,9 @@ eager 采样。模型适配代码均位于纯插件包中，无需修改 vLLM。
 可选 `vllm_omni.general_plugins` 注册完整的原生 TTS 两阶段 pipeline。
 
 原生 pipeline 已通过标准 Omni API 生成音频和 codec，使用上游调度、KV cache
-和音频输出协议，不使用开发工具的进程桥接。**完整 codec 一致性、自动 CLI 启动
-及性能配置尚未验收**，详见 [原生接入状态与边界](docs/native-pipeline.md)。
+和音频输出协议，不使用开发工具的进程桥接。标准 CLI 自动加载与语音 HTTP
+接口已验证，见 [原生服务](docs/native-serving.md)。**完整 codec 一致性及性能
+配置尚未验收**，详见 [原生接入状态与边界](docs/native-pipeline.md)。
 下面的隔离工具仍用于保留原 Torch / Transformers 环境的数值基线。
 
 ## 当前边界

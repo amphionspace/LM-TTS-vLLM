@@ -4,6 +4,7 @@ from pathlib import Path
 
 from vllm_omni.model_executor.models.qwen3_tts.configuration_qwen3_tts import Qwen3TTSConfig
 
+_registered = False
 
 class LMTTSConfig(Qwen3TTSConfig):
     model_type = "lm_tts"
@@ -43,12 +44,17 @@ class LMTTSConfig(Qwen3TTSConfig):
 
 
 def register():
+    global _registered
+    if _registered:
+        return
     from transformers import AutoConfig
     from vllm import ModelRegistry
     from vllm.transformers_utils.config import _CONFIG_REGISTRY
     from vllm_omni.config.pipeline_registry import register_pipeline
     from vllm_omni.model_executor.models.qwen3_tts.pipeline import QWEN3_TTS_PIPELINE
     from vllm_omni.model_executor.models.registry import OmniModelRegistry
+    from vllm_omni.entrypoints.openai.tts_adapters import register_tts_adapter
+    from .serving import LMTTSAdapter
     AutoConfig.register("lm_tts", LMTTSConfig, exist_ok=True)
     _CONFIG_REGISTRY["lm_tts"] = LMTTSConfig
     target = "lm_tts_vllm.omni_model:LMTTSForConditionalGeneration"
@@ -62,3 +68,5 @@ def register():
                         "lm_tts_vllm.native_payload.talker2code2wav_async_chunk"),
                 QWEN3_TTS_PIPELINE.stages[1]),
         default_deploy_config_name=str(Path(__file__).with_name("native_validation.yaml"))))
+    register_tts_adapter(LMTTSAdapter)
+    _registered = True
