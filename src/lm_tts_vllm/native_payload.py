@@ -4,6 +4,10 @@ import torch
 
 def normalize_voice_prompt(info):
     """Restore JSON codec matrices before the upstream tensor-only ICL path."""
+    nested = info.get("additional_information")
+    if isinstance(nested, dict):
+        # Match upstream preprocess: flattened runtime state takes precedence.
+        info = {**nested, **{k: v for k, v in info.items() if k != "additional_information"}}
     raw = info.get("voice_clone_prompt")
     prompt = raw[0] if isinstance(raw, list) and raw else raw
     if not isinstance(prompt, dict) or not isinstance(prompt.get("ref_code"), list):

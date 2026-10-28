@@ -13,6 +13,7 @@ from vllm_omni.model_executor.models.qwen3_tts.qwen3_tts_talker import (
 from .precision import apply_bf16
 from .code_predictor import CodePredictor
 from .native_payload import normalize_voice_prompt
+from .audio import canonical_audio_string
 
 
 class LMTTSForConditionalGeneration(Qwen3TTSTalkerForConditionalGeneration):
@@ -48,7 +49,7 @@ class LMTTSForConditionalGeneration(Qwen3TTSTalkerForConditionalGeneration):
             raise ValueError("x_vector_only_mode must be a boolean")
         if not x_vector_only_mode and (not isinstance(ref_text, str) or not ref_text.strip()):
             raise ValueError("ICL voice cloning requires reference text")
-        wav, sr = self._prompt_builder.normalize_ref_audio(ref_audio)
+        wav, sr = self._prompt_builder.normalize_ref_audio(canonical_audio_string(ref_audio))
         speaker = self._prompt_builder.extract_speaker_embedding(wav, sr)
         codes = None
         if not x_vector_only_mode:
@@ -60,6 +61,8 @@ class LMTTSForConditionalGeneration(Qwen3TTSTalkerForConditionalGeneration):
     @staticmethod
     def _validate_prompt(info):
         info.update(normalize_voice_prompt(info))
+        if isinstance(info.get("ref_audio"), list):
+            info["ref_audio"] = [canonical_audio_string(value) for value in info["ref_audio"]]
         mode = info.get("non_streaming_mode")
         mode = mode[0] if isinstance(mode, list) and mode else mode
         if mode is not None and not isinstance(mode, bool):

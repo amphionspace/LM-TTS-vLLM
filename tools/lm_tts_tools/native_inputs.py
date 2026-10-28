@@ -12,7 +12,8 @@ def reference_audio_payload(audio):
     if isinstance(audio, Path):
         return str(audio.resolve())
     if isinstance(audio, str):
-        return audio
+        from lm_tts_vllm.audio import canonical_audio_string
+        return canonical_audio_string(audio)
     if not isinstance(audio, (tuple, list)) or len(audio) != 2:
         raise ValueError('Reference audio must be a path/URL/base64 string or (waveform, sample_rate)')
     import numpy as np

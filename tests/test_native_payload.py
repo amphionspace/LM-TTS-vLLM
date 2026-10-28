@@ -13,6 +13,9 @@ class NativePayloadTests(unittest.TestCase):
         self.assertEqual(result["voice_clone_prompt"][0]["ref_code"].shape, (1, 16))
         self.assertIsInstance(raw["voice_clone_prompt"][0]["ref_code"], list)
         self.assertIs(normalize_voice_prompt(result), result)
+        wrapped = normalize_voice_prompt({"additional_information": raw, "non_streaming_mode": [False]})
+        self.assertEqual(wrapped["voice_clone_prompt"][0]["ref_code"].shape, (1, 16))
+        self.assertEqual(wrapped["non_streaming_mode"], [False])
         with self.assertRaises(ValueError):
             normalize_voice_prompt({"voice_clone_prompt": {"ref_code": [[2150] * 16]}})
 
