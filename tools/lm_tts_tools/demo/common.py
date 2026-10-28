@@ -7,4 +7,5 @@ MODELS = {
     "10000": {"source": Path('/workspace/workspace/yanglin/UltraEval-Audio/init_model/emilia-v4-emilia2-cbinit-langid-interleaved5x10-step-00010000'),
               "native": ROOT / 'artifacts/native-10000'},
 }
-REFERENCE = '/workspace/workspace/yanglin/UltraEval-Audio/raw_data/voice_clone_manifests/seed_tts_eval_zh/000000.wav'
+REFERENCE = str(ROOT / 'assets/reference/vo_anecdote_part1_4_zhongli_04.wav')
+REFERENCE_TEXT = '早听说枫丹的土壤水质都与璃月大不相同，不知道这枫丹种出来的茶叶，究竟是什么味道。'

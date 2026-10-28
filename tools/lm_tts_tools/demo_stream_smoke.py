@@ -9,7 +9,7 @@ import urllib.request
 def main():
     import numpy as np
     import soundfile as sf
-    from .demo.common import REFERENCE
+    from .demo.common import REFERENCE, REFERENCE_TEXT
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--port', type=int, default=7863)
     parser.add_argument('--output', type=Path, required=True)
@@ -32,7 +32,7 @@ def main():
              (False, True, True, 8), (True, False, False, 8), (True, True, True, 8)]
     rows, sampled = [], []
     for xvec, nonstream, greedy, cap in cases:
-        request = dict(model='10000', ref_audio=REFERENCE, ref_text='' if xvec else '在此奉劝大家别乱打美白针。',
+        request = dict(model='10000', ref_audio=REFERENCE, ref_text='' if xvec else REFERENCE_TEXT,
             text=text, x_vector_only_mode=xvec, non_streaming_mode=nonstream,
             temperature=0 if greedy else 0.9, greedy_cp=greedy, max_tokens=cap, seed=42)
         req = urllib.request.Request(url + '/synthesize_stream', data=json.dumps(request).encode(),

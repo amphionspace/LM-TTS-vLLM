@@ -7,7 +7,7 @@ import urllib.request
 import gradio as gr
 import soundfile as sf
 
-from .common import MODELS, REFERENCE, ROOT
+from .common import MODELS, REFERENCE, REFERENCE_TEXT, ROOT
 
 PRESETS = {
     '低温采样（原 demo）': (0.3, 10, 1.0, 2.0, True, 0.9, 50, 1.0),
@@ -71,7 +71,7 @@ def main():
                 mode = gr.Radio([('PyTorch（BF16 基线）', 'pytorch'), ('vLLM（原生插件）', 'vllm')], value='vllm', label='推理模式')
                 model = gr.Dropdown([('Emilia step-56384', '56384'), ('Emilia step-10000（5×10 interleaved）', '10000')], value='10000', label='模型')
                 ref_audio = gr.Audio(value=REFERENCE, type='filepath', label='参考音频（最长 30 秒）')
-                ref_text = gr.Textbox(value='在此奉劝大家别乱打美白针。', label='参考音频文本', lines=2)
+                ref_text = gr.Textbox(value=REFERENCE_TEXT, label='参考音频文本', lines=2)
                 non_streaming_mode = gr.Checkbox(value=False, label='一次性输入全部文本（关闭：10000 使用 5×10；56384 使用 Qwen overlay）')
                 text = gr.Textbox(value='你好，这是语音合成测试。', label='要合成的文本', lines=3)
                 language = gr.Dropdown(languages, value='Auto', label='语言')
