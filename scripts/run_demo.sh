@@ -8,6 +8,16 @@ export VLLM_PLUGINS=lm_tts,vllm_omni_register_models
 unset all_proxy ALL_PROXY http_proxy HTTP_PROXY https_proxy HTTPS_PROXY
 TTS_PYTHON=${TTS_PYTHON:-/workspace/workspace/yanglin/envs/lm-tts/bin/python}
 OMNI_PYTHON=${OMNI_PYTHON:-/tmp/lm-tts-omni/bin/python}
+FFMPEG_BIN=${FFMPEG_BIN:-$PWD/artifacts/ffmpeg/bin}
+if [[ -d "$FFMPEG_BIN" ]]; then
+    export PATH="$FFMPEG_BIN:$PATH"
+fi
+for executable in ffmpeg ffprobe; do
+    if ! command -v "$executable" >/dev/null; then
+        echo "Gradio streaming requires $executable; install FFmpeg or set FFMPEG_BIN." >&2
+        exit 1
+    fi
+done
 mkdir -p results/demo-service
 cleanup() { kill "$torch_pid" "$native_pid" "$ui_pid" 2>/dev/null || true; }
 trap cleanup EXIT INT TERM

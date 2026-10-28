@@ -22,6 +22,9 @@
 - 两种引擎的 RNG 算法及运算不同，相同 seed 不保证跨引擎生成相同 codec。
   当前完整 BF16 codec 对齐尚未通过；本页用于试听，不执行质量评分。
 
+浏览器流式播放需要系统 PATH 中的 `ffmpeg` 和 `ffprobe`。也可以将两者放入
+`artifacts/ffmpeg/bin/`，或用 `FFMPEG_BIN` 指定目录；启动脚本会在加载 GPU 前检查。
+
 启动（前台管理三个服务，任一服务退出时清理其余服务）：
 
 ```bash
@@ -45,3 +48,8 @@ Gradio 页面监听 `0.0.0.0:7861`。
 CP 训练侧选择 SDPA 是为了避开大 frame batch 下 FA2 deterministic backward
 的 workspace 失败；这里仅执行 forward，因此不受该训练限制。采样过滤行为
 已与原 Transformers warpers 对照测试。推理内核差异仍须单独做数值验证。
+
+2026-10-28 在线验证：step-10000 的 ICL/仅音色 × interleaved/非流式四种组合
+均返回有效音频；另外验证了 Talker/CP 同时采样及相同 seed 的重复输出。
+长文本 streaming 的逐块 WAV 拼接与完整 WAV 一致，Gradio 两种模式的上传、
+AAC 转码和完整音频下载通过。当前持久会话为 `lm-tts-demo`，使用 GPU5/6。
