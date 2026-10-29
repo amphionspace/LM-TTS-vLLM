@@ -1,6 +1,4 @@
 """Explicit BF16 operations matching the Qwen-TTS PyTorch implementation."""
-import types
-
 import torch
 from torch import nn
 from torch.nn import functional as F
@@ -34,7 +32,10 @@ class BFloatRope(nn.Module):
 
 
 def split_linear(self, x):
-    return torch.cat([F.linear(x, weight) for weight in self.weight.split(self.parity_sizes)], -1), None
+    # Slice instead of Tensor.split: torch.compile cannot trace split on vLLM's parameter subclass.
+    starts = [sum(self.parity_sizes[:i]) for i in range(len(self.parity_sizes))]
+    return torch.cat([F.linear(x, self.weight[start:start + size])
+                      for start, size in zip(starts, self.parity_sizes)], -1), None
 
 
 def mlp_forward(self, x):
@@ -44,11 +45,23 @@ def mlp_forward(self, x):
     return out
 
 
+_PATCHED = {}
+
+
+def _override_forward(module, forward):
+    # Swap in a subclass rather than binding a bound method on the instance:
+    # torch.compile cannot trace ``function.__get__`` from instance patches.
+    key = (type(module), forward)
+    if key not in _PATCHED:
+        _PATCHED[key] = type(f"BF16{type(module).__name__}", (type(module),), {"forward": forward})
+    module.__class__ = _PATCHED[key]
+
+
 def apply_bf16(backbone, config):
     """Preserve reference rounding boundaries while retaining native attention."""
     for module in backbone.modules():
         if hasattr(module, "variance_epsilon") and hasattr(module, "weight"):
-            module.forward = types.MethodType(rms_forward, module)
+            _override_forward(module, rms_forward)
     theta = getattr(config, "rope_theta", None)
     if theta is None:
         theta = config.rope_parameters["rope_theta"]
@@ -56,7 +69,7 @@ def apply_bf16(backbone, config):
         attn = layer.self_attn
         attn.rotary_emb = BFloatRope(config.head_dim, theta)
         attn.qkv_proj.parity_sizes = [attn.q_size, attn.kv_size, attn.kv_size]
-        attn.qkv_proj.forward = types.MethodType(split_linear, attn.qkv_proj)
+        _override_forward(attn.qkv_proj, split_linear)
         layer.mlp.gate_up_proj.parity_sizes = [config.intermediate_size] * 2
-        layer.mlp.gate_up_proj.forward = types.MethodType(split_linear, layer.mlp.gate_up_proj)
-        layer.mlp.forward = types.MethodType(mlp_forward, layer.mlp)
+        _override_forward(layer.mlp.gate_up_proj, split_linear)
+        _override_forward(layer.mlp, mlp_forward)

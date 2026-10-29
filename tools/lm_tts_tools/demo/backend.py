@@ -15,7 +15,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--mode', choices=['pytorch', 'vllm'], required=True)
     parser.add_argument('--port', type=int, required=True)
-    parser.add_argument('--warm-model', default='10000')
+    parser.add_argument('--warm-model', default='20000')
     args = parser.parse_args()
     import numpy as np
     import soundfile as sf
@@ -26,7 +26,7 @@ def main():
     from pydantic import BaseModel, Field
 
     class Request(BaseModel):
-        model: str = '10000'
+        model: str = '20000'
         ref_audio: str
         ref_text: str = ''
         text: str
@@ -83,8 +83,9 @@ def main():
             from transformers import AutoTokenizer
             load_omni_general_plugins()
             engine = AsyncOmni(model=str(MODELS[name]['native']), deploy_config=str(
-                Path(lm_tts_vllm.__file__).parent / 'native_input_streaming.yaml'), stage_overrides={
-                '0': {'kv_cache_memory_bytes': 536870912},
+                Path(lm_tts_vllm.__file__).parent / 'native_input_streaming.yaml'), stage_init_timeout=1200, stage_overrides={
+                '0': {'kv_cache_memory_bytes': 536870912, 'enforce_eager': False,
+                      'compilation_config': {'mode': 0, 'cudagraph_mode': 'FULL_DECODE_ONLY'}},
                 '1': {'max_model_len': 65536, 'max_num_batched_tokens': 65536,
                       'default_sampling_params': {'max_tokens': 65536}}})
             state['tokenizer'] = AutoTokenizer.from_pretrained(str(MODELS[name]['native']))
