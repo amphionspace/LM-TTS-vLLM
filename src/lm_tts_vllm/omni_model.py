@@ -33,6 +33,7 @@ class LMTTSForConditionalGeneration(Qwen3TTSTalkerForConditionalGeneration):
         self.mtp_sample_uniforms = False
         self.mtp_accepts_req_infos = True
         self._native_cp = None
+        self._max_num_seqs = vllm_config.scheduler_config.max_num_seqs
         self._training_layout = uses_training_layout(self.talker_config)
         self._training_plans = {}
         self._training_sample_counts = None
@@ -71,7 +72,7 @@ class LMTTSForConditionalGeneration(Qwen3TTSTalkerForConditionalGeneration):
 
     def load_weights(self, weights):
         loaded = super().load_weights(weights)
-        self._native_cp = CodePredictor(self.model_path)
+        self._native_cp = CodePredictor(self.model_path, max_batch=self._max_num_seqs)
         self._native_cp.capture()
         return loaded
 
@@ -157,25 +158,13 @@ class LMTTSForConditionalGeneration(Qwen3TTSTalkerForConditionalGeneration):
         return self._codec_mtp(input_ids, input_embeds, last_talker_hidden, text_step, **kwargs)
 
     def _training_mtp(self, input_ids, input_embeds, last_talker_hidden, text_step, **kwargs):
-        # Text slots must not run CP or consume its sampling generator.
+        # The batched CP runs every row; text slots keep their input embedding and emit no codes.
+        # Selecting rows on the host instead would synchronize every decode step.
         ids = input_ids.reshape(-1)
-        real = (ids >= 0) & (ids < self._codebook_vocab_size)
-        indices = real.nonzero().flatten()
-        combined = input_embeds.reshape(len(ids), -1).clone()
-        codes = torch.full((len(ids), 16), -1, dtype=torch.long, device=ids.device)
-        if indices.numel():
-            options = dict(kwargs)
-            selected = indices.cpu().tolist()
-            for key in ('req_infos', 'generators'):
-                if options.get(key) is not None:
-                    options[key] = [options[key][i] for i in selected]
-            frame_embeds, frames = self._codec_mtp(
-                ids[indices], input_embeds.reshape(len(ids), -1)[indices],
-                last_talker_hidden.reshape(len(ids), -1)[indices],
-                text_step.reshape(len(ids), -1)[indices], **options)
-            combined[indices] = frame_embeds
-            codes[indices] = frames
-        return combined, codes
+        real = ((ids >= 0) & (ids < self._codebook_vocab_size))[:, None]
+        frame_embeds, frames = self._codec_mtp(input_ids, input_embeds, last_talker_hidden, text_step, **kwargs)
+        combined = torch.where(real, frame_embeds, input_embeds.reshape(len(ids), -1))
+        return combined, torch.where(real, frames, torch.full_like(frames, -1))
 
     def _codec_mtp(self, input_ids, input_embeds, last_talker_hidden, text_step, **kwargs):
         do_sample = kwargs.get("do_sample")
