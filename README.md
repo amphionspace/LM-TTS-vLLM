@@ -3,8 +3,7 @@
 LM-TTS（Emilia Qwen3-TTS Base checkpoint）的 vLLM / vLLM-Omni 外部插件。
 安装后由插件入口自动注册，不需要修改 vLLM。
 
-当前优先级：**先能用**（整段合成 + 流式文本输入 + 试听 demo），
-其次 BF16 对齐，最后性能。
+目标是高吞吐推理服务。整段合成、流式文本输入和试听 demo 已可用，质量与 PyTorch 基线持平。
 
 ## 现在能做什么
 
@@ -15,8 +14,20 @@ LM-TTS（Emilia Qwen3-TTS Base checkpoint）的 vLLM / vLLM-Omni 外部插件。
 | step-56384（Qwen overlay）整段合成 | 可用；不支持流式文本输入 |
 | ICL（参考音频＋文本）/ 仅 x-vector 克隆，Talker / CP 采样，请求级 seed | 可用 |
 | 标准 `vllm serve --omni` 与 `/v1/audio/speech` | 整段可用 |
-| 与 PyTorch BF16 基线 codec 一致 | 未验收 |
-| 性能（Talker CUDA graph、prefix cache、并发） | 未做，当前是 eager 单请求配置 |
+| 质量与 PyTorch 基线持平（长文本 Whisper CER，20k） | 流式 0.031 / 整段 0.073 / PyTorch 0.043（各 16 条） |
+| 并发：`native_input_streaming.yaml` 默认 32 路，Talker CUDA graph，CP 批处理 CUDA graph | 可用，见下表 |
+| Code2Wav fp32（基线声码器为 fp32，这里是 bf16） | 未改：fp32 让每帧慢约 35%，等独占 GPU 再定 |
+
+共享 GPU（其他任务占满）上的流式输入吞吐，step-20000，同一段约 12 s 文本：
+
+| 并发 | 合计音频秒 / 秒 | 单路 RTF | 首包 | CER |
+| --- | --- | --- | --- | --- |
+| 1 | 0.48 | 2.10 | 1.9 s | 0.000 |
+| 8 | 2.95 | 2.47 | 4.1 s | 0.022 |
+| 32 | 9.95 | 2.85 | 7.8 s | 0.035 |
+
+单路 RTF > 1 是 GPU 被其他进程占满所致（机器空闲时测到 0.3–0.6），独占卡上需重测。
+测量：`python -m lm_tts_tools.bench --concurrency 1 8 32`。
 
 ### 流式文本输入怎么工作
 

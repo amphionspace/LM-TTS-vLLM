@@ -19,22 +19,26 @@ async def run(args):
     from vllm_omni import AsyncOmni
     from vllm_omni.plugins import load_omni_general_plugins
     import lm_tts_vllm
-    from lm_tts_vllm.input_stream import TextStreamBuffer
+    from lm_tts_vllm.input_stream import TextStreamBuffer, segment_prompt_length
     from lm_tts_vllm.interleaved import request_layout
 
     load_omni_general_plugins()
     base = json.loads(args.prompt.read_text())
+    # Only the voice prompt comes from the file; archived parity prompts are greedy and Chinese-tagged,
+    # and greedy residual codebooks loop on long text, so sampling settings are fixed here.
+    base.update(language=[args.language], subtalker_dosample=[True], subtalker_temperature=[0.9],
+                subtalker_top_k=[50], subtalker_top_p=[1.0])
     tok = AutoTokenizer.from_pretrained(args.model)
     encode = lambda s: tok.encode(s, add_special_tokens=False)
     raw = json.loads((args.model / 'config.json').read_text())
     talker = raw['talker_config']
     refs = len(base['voice_clone_prompt'][0]['ref_code'])
-    overrides = {'0': {'kv_cache_memory_bytes': 536870912}}
+    overrides = {}
     for stage, values in json.loads(args.overrides).items():
         overrides.setdefault(stage, {}).update(values)
     started = time.perf_counter()
     engine = AsyncOmni(model=str(args.model), deploy_config=str(
-        Path(lm_tts_vllm.__file__).parent / 'native_input_streaming.yaml'), stage_init_timeout=1200, stage_overrides=overrides)
+        Path(lm_tts_vllm.__file__).parent / 'native_input_streaming.yaml'), stage_init_timeout=1200, init_timeout=1800, stage_overrides=overrides)
     load_seconds = time.perf_counter() - started
 
     def params(max_tokens, seed=42, **extra):
@@ -90,8 +94,7 @@ async def run(args):
                 info = dict(base, lm_tts_input_stream=[True], lm_tts_chunk_index=[chunk.index],
                             lm_tts_chunk_text_ids=list(chunk.token_ids), lm_tts_chunk_final=[chunk.final],
                             lm_tts_chunk_frames=[chunk.audio_frames], full_utterance_decode=[False], text=[text])
-                prefix = 8 if str(base.get('language', ['Auto'])[0]).lower() == 'auto' else 9
-                n = (prefix + refs + len(chunk.token_ids)) if chunk.index == 0 else len(chunk.token_ids)
+                n = segment_prompt_length(chunk, base['language'][0], refs)
                 p = params(chunk.audio_frames + 1, seed, min_tokens=max(0, 2 - chunk.frames_before),
                            stop_token_ids=[talker['codec_pad_id'], talker['codec_eos_token_id']], ignore_eos=True)
                 yield StreamingInput(prompt={'prompt_token_ids': [0] * n, 'additional_information': info,
@@ -109,7 +112,17 @@ async def run(args):
                     results.setdefault('full', []).append(await timed(prompt, f'full-t{t}-s{seed}', p))
                     results.setdefault('stream', []).append(
                         await timed(stream_inputs(text, seed), f'stream-t{t}-s{seed}', None))
-        for i in range(0 if args.texts else args.repeats):
+        for n in args.concurrency or []:
+            # n simultaneous streamed-text requests with distinct seeds.
+            started = time.perf_counter()
+            runs = await asyncio.gather(*[timed(stream_inputs(TEXT, seed), f'c{n}-{seed}', None) for seed in range(n)])
+            wall = time.perf_counter() - started
+            results.setdefault('concurrency', []).append({
+                'n': n, 'wall': round(wall, 2), 'audio_per_second': round(sum(r['audio'] for r in runs) / wall, 2),
+                'mean_rtf': round(sum(r['rtf'] for r in runs) / n, 3),
+                'mean_first': round(sum(r['first'] for r in runs) / n, 3)})
+            print('CONCURRENCY ' + json.dumps(results['concurrency'][-1]), flush=True)
+        for i in range(0 if args.texts or args.concurrency else args.repeats):
             prompt, p = full_prompt()
             results.setdefault('full', []).append(await timed(prompt, f'full-{i}', p))
             results.setdefault('stream', []).append(await timed(stream_inputs(), f'stream-{i}', None))
@@ -129,6 +142,8 @@ def main():
     p.add_argument('--save', type=Path, help='directory for the generated WAVs')
     p.add_argument('--texts', type=Path, help='JSON list of texts; generates each with every --seeds value')
     p.add_argument('--seeds', type=int, nargs='+', default=[0, 1, 2, 3])
+    p.add_argument('--language', default='Auto')
+    p.add_argument('--concurrency', type=int, nargs='+', help='measure throughput with these numbers of parallel streams (at most max_num_seqs, 32)')
     asyncio.run(run(p.parse_args()))
 
 

@@ -16,11 +16,16 @@ stages:
   - stage_id: 0
     devices: "0"
     dtype: bfloat16
-    max_num_seqs: 1
+    max_num_seqs: 32
     max_model_len: 4096
     max_num_batched_tokens: 4096
-    gpu_memory_utilization: 0.08
-    enforce_eager: true
+    # ~112 KB per token: 4 GiB holds ~37k tokens, so 32 long streams never preempt (a preempted stream is truncated).
+    kv_cache_memory_bytes: 4294967296
+    enforce_eager: false
+    # Decode steps replay one full graph; streamed-text prefills use piecewise graphs.
+    compilation_config:
+      mode: 3
+      cudagraph_mode: FULL_AND_PIECEWISE
     enable_prefix_caching: false
     async_scheduling: false
     attention_backend: FLASH_ATTN
@@ -40,7 +45,7 @@ stages:
       model_type: lm_tts
     devices: "0"
     dtype: bfloat16
-    max_num_seqs: 1
+    max_num_seqs: 32
     max_model_len: 8192
     max_num_batched_tokens: 8192
     gpu_memory_utilization: 0.08

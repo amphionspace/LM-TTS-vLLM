@@ -83,9 +83,7 @@ def main():
             from transformers import AutoTokenizer
             load_omni_general_plugins()
             engine = AsyncOmni(model=str(MODELS[name]['native']), deploy_config=str(
-                Path(lm_tts_vllm.__file__).parent / 'native_input_streaming.yaml'), stage_init_timeout=1200, stage_overrides={
-                '0': {'kv_cache_memory_bytes': 536870912, 'enforce_eager': False,
-                      'compilation_config': {'mode': 0, 'cudagraph_mode': 'FULL_DECODE_ONLY'}},
+                Path(lm_tts_vllm.__file__).parent / 'native_input_streaming.yaml'), stage_init_timeout=1200, init_timeout=1800, stage_overrides={
                 '1': {'max_model_len': 65536, 'max_num_batched_tokens': 65536,
                       'default_sampling_params': {'max_tokens': 65536}}})
             state['tokenizer'] = AutoTokenizer.from_pretrained(str(MODELS[name]['native']))
