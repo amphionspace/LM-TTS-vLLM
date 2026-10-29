@@ -1,6 +1,6 @@
 # LM-TTS 5×10 输入协议
 
-step-10000 的 `talker_config.lm_tts_streaming_layout=interleaved` 自动选择训练协议。
+step-10000 / step-20000 的 `talker_config.lm_tts_streaming_layout=interleaved` 自动选择训练协议。
 `non_streaming_mode=False` 每 5 个文本 token 插入 10 帧 codec，文本 EOS 所在块之后
 可以连续生成音频。参考 codec 同样占用音频帧位置。`True` 使用训练的非流式布局。
 两种布局都按 LM-TTS-Training 的顺序逐项累加 BF16 codebook embeddings。

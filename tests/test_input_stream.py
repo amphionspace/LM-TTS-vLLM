@@ -38,6 +38,15 @@ class InputStreamTest(unittest.TestCase):
         self.assertEqual(len(chunk.token_ids),12)
         self.assertTrue(chunk.final)
 
+    def test_segment_prompt_length(self):
+        from lm_tts_vllm.input_stream import segment_prompt_length
+        b = TextStreamBuffer([1]*27, 104, 999, 400)
+        b.append([2]*40)
+        first, second = list(b.drain())[:2]
+        self.assertEqual(segment_prompt_length(first, 'Auto', 104), 8 + 104 + 55)
+        self.assertEqual(segment_prompt_length(first, 'Chinese', 104), 9 + 104 + 55)
+        self.assertEqual(segment_prompt_length(second, 'Auto', 104), 5)
+
 
 if __name__ == '__main__':
     unittest.main()

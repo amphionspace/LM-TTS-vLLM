@@ -22,7 +22,7 @@ async def run(args):
     from vllm_omni import AsyncOmni
     from vllm_omni.plugins import load_omni_general_plugins
     import lm_tts_vllm
-    from lm_tts_vllm.input_stream import TextStreamBuffer
+    from lm_tts_vllm.input_stream import TextStreamBuffer, segment_prompt_length
     from lm_tts_vllm.interleaved import request_layout
 
     load_omni_general_plugins()
@@ -80,7 +80,7 @@ async def run(args):
                               lm_tts_chunk_text_ids=list(chunk.token_ids), lm_tts_chunk_final=[chunk.final],
                               lm_tts_chunk_frames=[chunk.audio_frames], full_utterance_decode=[False],
                               text=[tok.decode(target_ids[:max(1, chunk.submitted_target_tokens)])])
-            n = (9 + refs + len(chunk.token_ids)) if chunk.index == 0 else len(chunk.token_ids)
+            n = segment_prompt_length(chunk, base['language'][0], refs)
             p = params(chunk.audio_frames + 1, min_tokens=chunk.audio_frames,
                        stop_token_ids=[talker['codec_pad_id'], talker['codec_eos_token_id']], ignore_eos=True)
             return StreamingInput(prompt={'prompt_token_ids': [0] * n, 'additional_information': chunk_info,
@@ -94,11 +94,15 @@ async def run(args):
             await asyncio.wait_for(ready.wait(), timeout=120)
             await asyncio.sleep(args.pause)
             for i in range(first_need, len(target_ids), args.step):
+                if buffer.exhausted:  # --frames reached before the text ran out
+                    return
                 buffer.append(target_ids[i:i + args.step])
                 for chunk in buffer.drain():
                     timeline.append(('send', chunk.index, time.perf_counter() - start))
                     yield stream_prompt(chunk)
                 await asyncio.sleep(args.pause)
+            if buffer.exhausted:
+                return
             buffer.append([], final=True)
             for chunk in buffer.drain():
                 timeline.append(('send', chunk.index, time.perf_counter() - start))

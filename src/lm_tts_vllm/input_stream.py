@@ -70,6 +70,13 @@ class TextStreamBuffer:
                 self.exhausted = True
 
 
+def segment_prompt_length(chunk, language, reference_frames):
+    """Placeholder prompt IDs for one segment: role, controls, speaker and text BOS precede the first."""
+    if chunk.index:
+        return len(chunk.token_ids)
+    return (8 if language.lower() == 'auto' else 9) + reference_frames + len(chunk.token_ids)
+
+
 def chunk_plan(chunk_frames, final):
     from .interleaved import DecodePlan
     # The last pad is a segment stop, never a KV input or an audio frame.

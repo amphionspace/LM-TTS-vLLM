@@ -14,7 +14,7 @@ def install_input_sessions(app, Request, *, mode, load, state, lock, outdir):
     from fastapi import HTTPException
     from fastapi.responses import StreamingResponse
     from pydantic import BaseModel
-    from lm_tts_vllm.input_stream import TextStreamBuffer
+    from lm_tts_vllm.input_stream import TextStreamBuffer, segment_prompt_length
 
     sessions = {}
 
@@ -74,8 +74,7 @@ def install_input_sessions(app, Request, *, mode, load, state, lock, outdir):
                 info = dict(base, text=[session['text']], lm_tts_input_stream=[True],
                     lm_tts_chunk_index=[chunk.index], lm_tts_chunk_text_ids=list(chunk.token_ids),
                     lm_tts_chunk_final=[chunk.final], lm_tts_chunk_frames=[chunk.audio_frames])
-                prefix = 8 if req.language.lower() == 'auto' else 9
-                length = prefix + refs + len(chunk.token_ids) if chunk.index == 0 else len(chunk.token_ids)
+                length = segment_prompt_length(chunk, req.language, refs)
                 params = SamplingParams(temperature=req.temperature, top_k=req.top_k or -1, top_p=req.top_p,
                     repetition_penalty=req.penalty, seed=req.seed, max_tokens=chunk.audio_frames+1,
                     min_tokens=max(0, 2-chunk.frames_before), stop_token_ids=[2148,2150], ignore_eos=True,
