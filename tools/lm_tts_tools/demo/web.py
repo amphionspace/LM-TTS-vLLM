@@ -40,7 +40,7 @@ def main():
 
     @app.get('/api/config')
     def config():
-        raw = json.loads((MODELS['10000']['source'] / 'config.json').read_text())
+        raw = json.loads((MODELS['20000']['source'] / 'config.json').read_text())
         languages = ['Auto'] + [s.capitalize() for s in raw['talker_config']['codec_language_id'] if 'dialect' not in s]
         return {'reference': {'path': REFERENCE, 'text': REFERENCE_TEXT}, 'languages': languages}
 

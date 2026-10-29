@@ -168,7 +168,7 @@ def install_input_sessions(app, Request, *, mode, load, state, lock, outdir):
                 await session['output'].put(progress(session, '正在加载模型'))
                 engine = load(req.model)
                 if not state['training']:
-                    raise ValueError('当前流式文本输入支持 step-10000')
+                    raise ValueError('当前流式文本输入支持 step-20000')
                 torch.manual_seed(req.seed)
                 started = time.perf_counter()
                 parts, rate, first_audio = [], None, None
@@ -208,8 +208,8 @@ def install_input_sessions(app, Request, *, mode, load, state, lock, outdir):
 
     @app.post('/input_sessions')
     async def create(req: Request):
-        if req.model != '10000':
-            raise HTTPException(400, '当前流式文本输入支持 step-10000')
+        if req.model != '20000':
+            raise HTTPException(400, '当前流式文本输入支持 step-20000')
         if not req.ref_text.strip():
             raise HTTPException(400, '需要参考文本')
         if not 0 < sf.info(req.ref_audio).duration <= 30:

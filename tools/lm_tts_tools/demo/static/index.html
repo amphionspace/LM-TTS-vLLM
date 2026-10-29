@@ -96,7 +96,7 @@ details > div { margin-top: 12px; }
         </div>
         <div class="row">
           <div><label for="model">模型</label>
-            <select id="model"><option value="10000">step-10000（5×10，支持流式）</option><option value="56384">step-56384</option></select></div>
+            <select id="model"><option value="20000">step-20000（5×10，支持流式）</option><option value="56384">step-56384</option></select></div>
           <div><label for="language">语言</label><select id="language"></select></div>
         </div>
       </section>
@@ -114,6 +114,7 @@ details > div { margin-top: 12px; }
       <section class="card">
         <div class="tabs" id="tabs"><button data-v="stream" class="on">流式输入</button><button data-v="full">整段合成</button></div>
         <div id="pane-full" class="hidden">
+          <p class="hint">已知问题：整段合成长文本时偶尔提前结束（后半句没念），排查中；长文本请先用"流式输入"。</p>
           <textarea id="full-text" rows="4">你好，这是一段语音合成测试。今天天气很好，我们一起去公园散散步吧。</textarea>
           <div class="actions"><button class="btn primary" id="run">合成</button></div>
         </div>
@@ -391,7 +392,7 @@ async function simulate() {
 }
 
 function updateButtons() {
-  const streamOk = $('model').value === '10000';
+  const streamOk = $('model').value === '20000';
   $('run').disabled = state.busy;
   $('send').disabled = !streamOk || state.simulating || (state.busy && !state.session);
   $('finish').disabled = !state.session || state.simulating;

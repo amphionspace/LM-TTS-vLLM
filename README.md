@@ -10,8 +10,8 @@ LM-TTS（Emilia Qwen3-TTS Base checkpoint）的 vLLM / vLLM-Omni 外部插件。
 
 | 能力 | 状态 |
 | --- | --- |
-| step-10000（5×10 interleaved）整段合成，分块返回音频 | 可用 |
-| step-10000 **流式文本输入**：同一请求分段追加文本、保留 KV，边输入边出音频 | 可用（vLLM 与 PyTorch 两个后端） |
+| step-20000（5×10 interleaved）整段合成，分块返回音频 | 可用 |
+| step-20000 **流式文本输入**：同一请求分段追加文本、保留 KV，边输入边出音频 | 可用（vLLM 与 PyTorch 两个后端） |
 | step-56384（Qwen overlay）整段合成 | 可用；不支持流式文本输入 |
 | ICL（参考音频＋文本）/ 仅 x-vector 克隆，Talker / CP 采样，请求级 seed | 可用 |
 | 标准 `vllm serve --omni` 与 `/v1/audio/speech` | 整段可用 |
@@ -68,6 +68,6 @@ PYTHONPATH=tools $TTS_PYTHON -m lm_tts_tools.input_session_smoke --port 7863
 | `tools/lm_tts_tools/` | `prepare_native`（生成模型视图）、`training_reference`（PyTorch 基线导出）、各类 smoke、`demo/` |
 | `tests/` | `PYTHONPATH=src:tools python -m unittest discover -s tests` |
 | `docs/` | [5×10 布局](docs/interleaved.md)、[demo](docs/demo.md)、[标准服务](docs/native-serving.md)、[功能矩阵](docs/qwen-compatibility.md) |
-| `artifacts/` | `native-10000` / `native-56384` 模型视图（config＋权重软链），ffmpeg |
+| `artifacts/` | `native-20000` / `native-10000` / `native-56384` 模型视图（config＋权重软链），ffmpeg |
 
 旧的 pooling 对齐路径和 step-100 相关内容已删除，需要时可以从 git 历史（`6154819` 之前）找回。
