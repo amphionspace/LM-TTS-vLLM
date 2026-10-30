@@ -250,19 +250,22 @@ async function* events(res) {
 }
 
 // Gapless playback: each decoded chunk starts exactly when the previous one ends.
+// Chunks download in parallel but are scheduled in arrival order, so a slow fetch cannot reorder speech.
 const player = {
-  ctx: null, next: 0, total: 0, started: 0, timer: null,
+  ctx: null, next: 0, total: 0, started: 0, timer: null, queue: Promise.resolve(),
   reset() {
     if (this.ctx) this.ctx.close();
     this.ctx = new (window.AudioContext || window.webkitAudioContext)();
-    this.next = 0; this.total = 0; this.started = 0;
+    this.next = 0; this.total = 0; this.started = 0; this.queue = Promise.resolve();
     clearInterval(this.timer); this.timer = setInterval(() => this.tick(), 200); this.tick();
   },
-  async push(path) {
+  push(path) {
     const ctx = this.ctx;
-    const data = await (await fetch(audioUrl(path))).arrayBuffer();
+    const decoded = fetch(audioUrl(path)).then(r => r.arrayBuffer()).then(data => ctx.decodeAudioData(data));
+    return this.queue = this.queue.then(() => decoded).then(buffer => this.schedule(ctx, buffer)).catch(() => {});
+  },
+  schedule(ctx, buffer) {
     if (!ctx || ctx !== this.ctx || ctx.state === 'closed') return;
-    const buffer = await ctx.decodeAudioData(data);
     const src = this.ctx.createBufferSource();
     src.buffer = buffer; src.connect(this.ctx.destination);
     const now = this.ctx.currentTime;

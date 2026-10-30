@@ -8,7 +8,7 @@ import sys
 import time
 import uuid
 
-from .common import MODELS, ROOT
+from .common import MODELS, REFERENCE, REFERENCE_TEXT, ROOT
 
 
 def main():
@@ -45,7 +45,7 @@ def main():
         max_tokens: int = Field(default=512, ge=3, le=2048)
 
     app = FastAPI()
-    state = {'model': None, 'engine': None, 'tokenizer': None, 'training': False}
+    state = {'model': None, 'engine': None, 'tokenizer': None, 'training': False, 'warm': False}
     lock = asyncio.Lock()
     outdir = ROOT / 'results/demo'
     outdir.mkdir(parents=True, exist_ok=True)
@@ -204,7 +204,7 @@ def main():
 
     @app.get('/health')
     def health():
-        return {'mode': args.mode, 'model': state['model'], 'ready': state['engine'] is not None}
+        return {'mode': args.mode, 'model': state['model'], 'ready': state['engine'] is not None and state['warm']}
 
     @app.post('/synthesize')
     async def synthesize(req: Request):
@@ -230,8 +230,23 @@ def main():
         return StreamingResponse(events(), media_type='application/x-ndjson')
 
     from .input_sessions import install_input_sessions
-    install_input_sessions(app, Request, mode=args.mode, load=load, state=state, lock=lock, outdir=outdir)
+    warmup = install_input_sessions(app, Request, mode=args.mode, load=load, state=state, lock=lock, outdir=outdir)
     load(args.warm_model)
+
+    @app.on_event('startup')
+    async def warm():
+        async def run():
+            started = time.perf_counter()
+            try:
+                if state['training']:
+                    await warmup(Request(model=args.warm_model, ref_audio=REFERENCE, ref_text=REFERENCE_TEXT, text=''),
+                                 '你好，这是一段预热用的流式语音合成。文本分段送入，让首次请求也和后面的请求一样快。')
+                print(f'warmup finished in {time.perf_counter() - started:.1f}s', flush=True)
+            except Exception:
+                import traceback
+                traceback.print_exc()
+            state['warm'] = True
+        asyncio.create_task(run())
     try:
         uvicorn.run(app, host='127.0.0.1', port=args.port, log_level='info')
     finally:

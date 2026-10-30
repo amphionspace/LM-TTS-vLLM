@@ -217,12 +217,15 @@ def install_input_sessions(app, Request, *, mode, load, state, lock, outdir):
             sessions.pop(old_id, None)
         if len(sessions) >= 8:
             raise HTTPException(429, '请先结束已有会话')
+        return {'session_id':open_session(req)['id']}
+
+    def open_session(req):
         sid = uuid.uuid4().hex
         session = {'id':sid,'input':asyncio.Queue(),'output':asyncio.Queue(),'text':'',
                    'submitted_chars':0,'segments':0,'closed':False,'input_closed':False,'cancel':threading.Event()}
         sessions[sid]=session
         session['task']=asyncio.create_task(run(session,req))
-        return {'session_id':sid}
+        return session
 
     @app.post('/input_sessions/{sid}/text')
     async def send(sid: str, delta: Delta):
@@ -264,3 +267,16 @@ def install_input_sessions(app, Request, *, mode, load, state, lock, outdir):
             session['cancel'].set()
             session['task'].cancel()
         return {'cancelled':True}
+
+    async def warmup(req, text):
+        """Run one streamed session end to end; the first request otherwise pays seconds of lazy setup."""
+        session = open_session(req)
+        await session['input'].put(Delta(text=text, final=True))
+        await session['task']
+        sessions.pop(session['id'], None)
+        while not session['output'].empty():
+            event = session['output'].get_nowait()
+            if event and event['type'] == 'error':
+                raise RuntimeError(event['detail'])
+
+    return warmup
