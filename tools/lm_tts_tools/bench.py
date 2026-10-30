@@ -95,7 +95,7 @@ async def run(args):
                             lm_tts_chunk_text_ids=list(chunk.token_ids), lm_tts_chunk_final=[chunk.final],
                             lm_tts_chunk_frames=[chunk.audio_frames], full_utterance_decode=[False], text=[text])
                 n = segment_prompt_length(chunk, base['language'][0], refs)
-                p = params(chunk.audio_frames + 1, seed, min_tokens=max(0, 2 - chunk.frames_before),
+                p = params(chunk.audio_frames, seed, min_tokens=max(0, 2 - chunk.frames_before),
                            stop_token_ids=[talker['codec_pad_id'], talker['codec_eos_token_id']], ignore_eos=True)
                 yield StreamingInput(prompt={'prompt_token_ids': [0] * n, 'additional_information': info,
                                              'model_intermediate_buffer': info}, sampling_params=p)

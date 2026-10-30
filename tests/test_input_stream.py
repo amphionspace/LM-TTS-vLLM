@@ -45,7 +45,7 @@ class InputStreamTest(unittest.TestCase):
         first, second = list(b.drain())[:2]
         self.assertEqual(segment_prompt_length(first, 'Auto', 104), 8 + 104 + 55)
         self.assertEqual(segment_prompt_length(first, 'Chinese', 104), 9 + 104 + 55)
-        self.assertEqual(segment_prompt_length(second, 'Auto', 104), 5)
+        self.assertEqual(segment_prompt_length(second, 'Auto', 104), 6)
 
 
 if __name__ == '__main__':

@@ -76,7 +76,7 @@ def install_input_sessions(app, Request, *, mode, load, state, lock, outdir):
                     lm_tts_chunk_final=[chunk.final], lm_tts_chunk_frames=[chunk.audio_frames])
                 length = segment_prompt_length(chunk, req.language, refs)
                 params = SamplingParams(temperature=req.temperature, top_k=req.top_k or -1, top_p=req.top_p,
-                    repetition_penalty=req.penalty, seed=req.seed, max_tokens=chunk.audio_frames+1,
+                    repetition_penalty=req.penalty, seed=req.seed, max_tokens=chunk.audio_frames,
                     min_tokens=max(0, 2-chunk.frames_before), stop_token_ids=[2148,2150], ignore_eos=True,
                     detokenize=False, output_kind=RequestOutputKind.DELTA, extra_args={'tts_local_seed': req.seed})
                 yield StreamingInput(prompt={'prompt_token_ids': [0]*length,

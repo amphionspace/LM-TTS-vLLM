@@ -37,6 +37,7 @@ class LMTTSForConditionalGeneration(Qwen3TTSTalkerForConditionalGeneration):
         self._training_layout = uses_training_layout(self.talker_config)
         self._training_plans = {}
         self._training_sample_counts = None
+        self._segment_tails = {}  # request -> last frame embedding of its unfinished streamed segment
         if self._training_layout:
             self._prompt_builder = TrainingPromptBuilder(self._prompt_builder, self)
             self.logitsprocs_need_output_token_ids = True
@@ -115,14 +116,22 @@ class LMTTSForConditionalGeneration(Qwen3TTSTalkerForConditionalGeneration):
 
     def _stream_text_prefill(self, input_ids, info):
         from .input_stream import chunk_plan
+        key = str(info['req_id'])
+        tail = self._segment_tails.get(key)
+        if tail is None:
+            raise ValueError('Streaming segment resumed without its previous last frame')
         ids = torch.tensor(info['lm_tts_chunk_text_ids'], device=input_ids.device, dtype=torch.long)
         projected = self.text_projection(self.text_embedding(ids))
         pad_ids = torch.full_like(ids, self.talker_config.codec_pad_id)
-        embeddings = projected + self.embed_input_ids(pad_ids)
-        start = int(info['_omni_prompt_len']) - len(ids)
+        # The previous segment's last frame is an audio slot (codec sum + tts_pad), as in a decode step.
+        frame = (tail + self._tts_pad_embed.reshape(-1).to(tail.dtype)).to(projected.dtype)
+        embeddings = torch.cat([frame[None], projected + self.embed_input_ids(pad_ids)])
+        start = int(info['_omni_prompt_len']) - len(embeddings)
         offset = int(info.get('_omni_num_computed_tokens', start)) - start
-        if offset < 0 or offset + len(input_ids) > len(ids):
+        if offset < 0 or offset + len(input_ids) > len(embeddings):
             raise ValueError('Streaming text continuation does not match retained KV positions')
+        if offset + len(input_ids) == len(embeddings):
+            del self._segment_tails[key]
         plan = chunk_plan(int(first(info['lm_tts_chunk_frames'])), bool(first(info['lm_tts_chunk_final'])))
         self._training_plans[str(info['req_id'])] = plan
         return input_ids.fill_(self.talker_config.codec_pad_id), embeddings[offset:offset+len(input_ids)], {
@@ -163,6 +172,15 @@ class LMTTSForConditionalGeneration(Qwen3TTSTalkerForConditionalGeneration):
         ids = input_ids.reshape(-1)
         real = ((ids >= 0) & (ids < self._codebook_vocab_size))[:, None]
         frame_embeds, frames = self._codec_mtp(input_ids, input_embeds, last_talker_hidden, text_step, **kwargs)
+        if not torch.cuda.is_current_stream_capturing():
+            # The next streamed segment's prefill feeds this frame if it ends the segment.
+            for row, info in enumerate(kwargs.get("req_infos") or ()):
+                if first(info.get('lm_tts_input_stream'), False) and not first(info.get('lm_tts_chunk_final'), False):
+                    key = str(info['req_id'])
+                    self._segment_tails.pop(key, None)
+                    self._segment_tails[key] = frame_embeds[row]
+            while len(self._segment_tails) > 4 * self._max_num_seqs:  # abandoned sessions
+                self._segment_tails.pop(next(iter(self._segment_tails)))
         combined = torch.where(real, frame_embeds, input_embeds.reshape(len(ids), -1))
         return combined, torch.where(real, frames, torch.full_like(frames, -1))
 

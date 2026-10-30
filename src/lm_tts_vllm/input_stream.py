@@ -71,13 +71,18 @@ class TextStreamBuffer:
 
 
 def segment_prompt_length(chunk, language, reference_frames):
-    """Placeholder prompt IDs for one segment: role, controls, speaker and text BOS precede the first."""
+    """Placeholder prompt IDs for one segment; request it with max_tokens=chunk.audio_frames.
+
+    Role, controls, speaker and text BOS precede the first segment. A later
+    segment starts with the previous segment's last frame: vLLM discards the
+    last sampled token on resume, so that frame enters the KV here, together
+    with the new text, instead of costing one more decode step.
+    """
     if chunk.index:
-        return len(chunk.token_ids)
+        return 1 + len(chunk.token_ids)
     return (8 if language.lower() == 'auto' else 9) + reference_frames + len(chunk.token_ids)
 
 
 def chunk_plan(chunk_frames, final):
     from .interleaved import DecodePlan
-    # The last pad is a segment stop, never a KV input or an audio frame.
-    return DecodePlan((-1,) * chunk_frames + (0,), (final,) * chunk_frames + (False,), 0)
+    return DecodePlan((-1,) * chunk_frames, (final,) * chunk_frames, 0)
